@@ -1,0 +1,118 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "eval-scoring-throughput"
+bench = "e2e"
+kind = "performance"
+language = "python"
+title = "评测流水线的端到端吞吐（LLM 评测与压测）"
+ext_id = "e2e-h3-eval-harness-throughput-quality"
+difficulty = "hard"
+category = "ml_systems"
+lane = "e2e_task"
+family = "C_quality_budget"
+midtopic = "H3"
+author = "fai-bench"
+tags = [
+    "python",
+    "lm-evaluation-harness",
+    "eval-harness",
+    "throughput",
+    "filter-ensemble",
+    "metric-compute",
+    "consistency-gate",
+    "quality-under-budget",
+    "cpu-only",
+]
+description = "Optimize the end-to-end THROUGHPUT of an LLM evaluation harness's scoring/aggregation pipeline (the lm-evaluation-harness filter-ensemble + metric path: regex answer extraction, take-first / majority-vote transforms, loglikelihood-choice accuracy, exact_match/contains/prefix_match) over a FIXED held-out record set, using the baked lm-evaluation-harness /app/repo. The scored stage runs AFTER generation, so it is 100% CPU work and the lane is CPU-only (no GPU, no torch). The candidate submits scoring_pipeline.py exposing load_scoring_pipeline_for_verification(device) -> .score(samples) -> [{'id','score'}]. Scored on a BOUNDED [0,1] scale against a strong (already-vectorised) baseline that the harness RE-MEASURES in-session: speedup = median over >=5 alternating ABBA pairs of baseline_time / candidate_time; reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0; speedup <= 1 -> 0. A WELDED per-sample exact-match consistency gate (harness recomputes reference scores with its OWN implementation; any mismatch/skip/missing id -> 0) forecloses trading correctness for speed; an anti-cache probe re-scores perturbed inputs so a copied id->score table also scores 0. The harness owns the sample set, the gold targets, the reference scorer, and the clock."
+instruction = "instruction.md"
+
+# BOUNDED reward per the bench reward spec (性能类):
+#   reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0,  range [0.0, 1.0]
+#   speedup = median over >=5 alternating ABBA pairs of baseline_time/candidate_time, the
+#             strong baseline RE-MEASURED in-session; ref_speedup = 2.24419 (frozen
+#             authoring-time constant, never re-derived at scoring).
+# Semantics: speedup <= 1 (i.e. merely MATCHING the strong baseline) -> 0, NOT 1.0.
+#            speedup == ref_speedup -> 0.0 (must EXCEED it to score).  Cap 1.0 only at speedup >= ref_speedup^2.
+# 0 on any hard-fail (consistency gate / anti-cache probe / shape / hang / crash /
+# forbidden-edit / missing-or-invalid ref_speedup), with a named hard_fail_reason.
+[agent]
+timeout_sec = 21600
+
+# Open-source build: `cd task && docker build -f environment/Dockerfile -t fai/e2e-h3-eval-scoring-throughput:oss .`
+# provenance (original internal image, not publicly pullable): <internal registry>/kernelbench/e2e-h3-eval-harness-throughput-quality-val:v2-timer@sha256:da29c24e8c8a27acb7091d620b60de12dbdc0beceacff914a9b6e19e3ea37c97
+# 🔁 LOOP16: the shipped image is the loop16 overlay (`crane append` onto the :oss base, purely
+#    additive — /opt/loop + /app/instruction.md only, NOTHING under tests/ changed), so the "1..16
+#    submissions" the instruction promises is REAL. Build it in two steps:
+#      docker build -f environment/Dockerfile             -t fai/e2e-h3-eval-scoring-throughput:oss .
+#      docker build -f environment/loop_overlay/Dockerfile -t fai/e2e-h3-eval-scoring-throughput:oss-loop16 environment/loop_overlay
+#    The single-shot form (:oss) is a valid alternative; the graded surface (tests/) is identical in both.
+[environment]
+docker_image = "fai/e2e-h3-eval-scoring-throughput:oss-loop16"
+dockerfile = "environment/loop_overlay/Dockerfile"
+dockerfile_single_shot = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+# CPU-only ON PURPOSE. The scored path is the harness's post-generation scoring/aggregation stage:
+# regex extraction, filter transforms, argmax over per-choice loglikelihoods, string metrics. That is
+# 100% CPU work over Python objects, and the baked wro-lmeval-base ships NO torch -- so declaring an
+# H20 would both waste the scarce GPU lane and mislead a solver into an import that cannot succeed.
+gpus = 0
+storage_mb = 40960
+# 🔴 换硬件/换环境要重测锚点。本题 gpus = 0,ref_speedup = 2.24419 与
+#    thresholds.strong_baseline_time_sec = 0.174827 都在**作者的 CPU 通道
+#    (Intel Sapphire Rapids, AVX-512-VNNI)**上标定。verifier 会以 ABBA 配对现场重测强基线,
+#    所以比值相对可移植,但单核吞吐/向量宽度差异很大的机器仍会偏 —— 请按
+#    tests/verifier-correctness-manifest.json 的 recalibrate_howto,用随包发布的 oracle
+#    (task/tests/oracles/ 与 task/solution/ceiling_columnar.py)在本机重标该锚点,再计分。
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timeout_sec = 3000
+task_kind = "e2e_optimization"
+submission_root = "/app/submission"
+forbidden_edit_paths = [
+    "tests/compute_reward.py",
+    "tests/test.sh",
+    "tests/heldout_samples.jsonl",
+    "tests/verifier-correctness-manifest.json",
+    "/opt/verifier",
+    "/opt/verifier-correctness-manifest.json",
+]
+result_paths = [
+    "/logs/verifier/metrics.json",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+    "/logs/verifier/benchmark_results.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/verifier_state.json",
+]
+restore_paths = [{ from = "artifacts/scoring_pipeline.py", to = "/app/submission/scoring_pipeline.py" }, { from = "artifacts/scoring_config.json", to = "/app/submission/scoring_config.json" }]
+
+[verifier.frozen]
+note = "v1 声明不出 primary_edit_paths:整个 repo 可编辑,被计分的交付物在 [verifier].submission_root 下;评分面靠 [verifier].forbidden_edit_paths + tests/test.sh 里的 sha256 门冻结。"
+
+[primary_metric]
+name = "reward"
+goal = "maximize"
+source = "/logs/verifier/metrics.json"
+ref_speedup = 2.24419
+ref_speedup_source = "tests/verifier-correctness-manifest.json"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+# loop16: the shipped image bakes /opt/loop; the in-session dev proxy runs the candidate on the
+# PUBLIC, disjoint /data/eval_harness/dev split, enforces the REAL welded consistency + anti-cache
+# gates, and times ABBA against the PUBLIC naive template for a RAW best-of-k ranking signal (NO
+# strong-baseline reference, NO held-out set, NO calibrated anchor baked). At most 16 submissions, at
+# least 1; the model decides when to stop (min=1 so --finalize works any time). The graded score is
+# the runner's fresh end-of-session tests/ grade over the hidden set with the strong-baseline ABBA.
+[loop]
+min_submissions = 1
+max_submissions = 16
+submit = "bash /opt/loop/submit.sh"

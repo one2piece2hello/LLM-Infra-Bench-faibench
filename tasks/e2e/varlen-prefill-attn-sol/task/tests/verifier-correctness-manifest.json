@@ -1,0 +1,172 @@
+{
+  "task_id": "e2e-d1-varlen-prefill-attn-sol",
+  "lane": "e2e_task",
+  "family": "B_serving",
+  "task_kind": "performance",
+  "schema": "e2e_verifier_manifest_v1",
+  "baked_repo": {
+    "repo": "vllm-project/vllm",
+    "release": "0.10.1.1",
+    "commit": "1da94e673c257373280026f75ceb4effac80e892",
+    "base_image": "<internal registry>/kernelbench/wro-vllm-consistent-repo-base:v1@sha256:64a9efc82e1003574ee10461382ae088f12e2fa3432b080dbd72d3e73630c259",
+    "git_history": "stripped -> fresh single commit 'baseline' (build-time asserts: rev-list==1, no remote, no reflog, live diff base)"
+  },
+  "entry_contract": {
+    "path": "/app/repo/submission/varlen_prefill_attn.py",
+    "class": "VarlenPrefillAttention",
+    "methods": [
+      "__init__(cfg)",
+      "prepare()",
+      "forward(q,k,v,cu_seqlens,max_seqlen,out)"
+    ],
+    "submission_root": "/app/repo/submission",
+    "note": "/app/submission is a symlink to /app/repo/submission so the loop16 best-of-k snapshot of /app/repo covers the solver's work"
+  },
+  "metric": {
+    "name": "log_speedup_vs_ref_speedup",
+    "formula": "reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0; range [0,1]",
+    "speedup": "ABBA paired: baseline and candidate suites run ALTERNATELY for 5 pairs in fresh sub-processes; per pair ratio = geomean over the 8 hidden timed cases of baseline_ms/candidate_ms (== geomean_sol_fraction(cand)/geomean_sol_fraction(base), the per-case T_SOL cancels); speedup = median over pairs",
+    "sol_fraction_definition": "per case sol_fraction = T_SOL / t_call ; T_SOL = min_causal_FLOPs / measured_dense_bf16_peak ; min_causal_FLOPs = sum_i 4*num_q_heads*head_size*L_i*(L_i+1)/2 ; t_call = harness CUDA-event median over timed blocks",
+    "anchor_semantics": "speedup == ref_speedup -> 0.0 (must EXCEED it to score) ; speedup >= ref_speedup^2 (2.3461) -> 1.0 ; speedup <= 1 -> 0",
+    "migrated_from": "sol_fraction_geomean_vs_strong_baseline, reward = geomean(candidate)/geomean(strong_baseline), open-ended NO cap (superseded 2026-07-27 by MOD_SPEC v1 改动 2A / reward.md)",
+    "measured_h20_dense_bf16_tflops": 137.94,
+    "peak_measurement_note": "cuBLAS 8192^3 bf16, best-of-30, measured FOUR times on NVIDIA H20: 137.726 / 137.905 / 137.985 (this task's three sessions) and 138.14 (the sibling d123 slice) -> spread 0.30%. The constant is fixed at 137.94; because the reward is a RATIO of two geomeans measured in the same run, the constant cancels from the score and only sets the reported absolute fraction.",
+    "plausibility_max_sol_fraction": 1.15,
+    "expected_case_count": 8
+  },
+  "strong_baseline": {
+    "impl": "harness/baseline_prefill.py",
+    "description": "torch built-in FlashAttention-2 varlen (aten::_flash_attention_forward with cu_seqlens, is_causal=True) — the strongest off-the-shelf varlen causal prefill kernel in the image",
+    "geomean_sol_fraction": 0.4457,
+    "calibrated_on": "NVIDIA H20 2026-07-26",
+    "repeat_runs": [
+      0.44394,
+      0.44738
+    ],
+    "within_session_repeat_delta_pct": 0.78,
+    "per_case_geomean_sol_fraction": {
+      "h1_ragged_mid_20": 0.4743,
+      "h2_many_short_56": 0.2151,
+      "h3_chunk_uniform_28": 0.3651,
+      "h4_gqa_hd64_10": 0.4672,
+      "h5_mha_hd128_10": 0.4427,
+      "h6_onelong_manyshort": 0.5733,
+      "h7_uniform_long_4": 0.5842,
+      "h8_bimodal_23": 0.5846
+    }
+  },
+  "quality_gate": {
+    "kind": "fp32_causal_parity_plus_degenerate_edge_suite_plus_anticheat",
+    "parity_tolerance": 0.1,
+    "parity_measure": "per query row: max elementwise |candidate-fp32_reference| / (RMS of that row's fp32 reference)",
+    "parity_calibration": "measured worst across FOUR independent correct implementations (FA2 varlen, a hand-written Triton kernel, per-sequence SDPA, chunked fp32 torch) over the timed suite INCLUDING two full-tensor cases and the 12-case edge suite = 0.0205 -> the tolerance sits 4.9x above it",
+    "full_parity_cases": [
+      "h2_many_short_56",
+      "h3_chunk_uniform_28"
+    ],
+    "edge_case_count": 12,
+    "anticheat": [
+      "poison-sentinel unwritten-output probe",
+      "stale/memoisation probe (3 different workloads per case must give 3 different correct outputs)",
+      "input immutability (q/k/v bit-identical after the call)",
+      "query rotation across timed blocks",
+      "workspace allocation budget 3 GiB",
+      "plausibility hard-fail above 1.15 of the measured dense peak"
+    ]
+  },
+  "frozen_surface_sha256": {
+    "compute_reward.py": "7e99747bf5f592bf215c524eae8ddd9b533af3ff54805b9923b831beb0435e55",
+    "test.sh": "0bbf1e9632a5dcd23faf5e4eb08163f2b01dda8135d302ed4f12bad07e98d8b5",
+    "harness/bench_prefill.py": "8e9599a74df6c15890599311a71438687d639aec20b66d528431ac8903be801a",
+    "harness/baseline_prefill.py": "95c64a6f72dcf907b9a1472a49ca6071ab9a36d7ee1b571ebcf5f6f5464c3d0f",
+    "harness/hidden_suite.json": "a8fb933b21dfe5eec4c579cb73df0f77b7667bcd87a82e03c9b4473e78f1f6c7"
+  },
+  "anti_cheat_remediation_20260726": "loop16 per-round leak channel closed : verifier stdout->private root-0600 log, /logs/verifier 5-file output redacted to reward+gate+category, EXIT-trap artifact copy disabled, emit_zero reason categorised - all gated on LOOP_DEV_OUT so the authoritative single-shot path keeps full diagnostics. frozen_surface_sha256 re-pinned.",
+  "abba_pairs": 5,
+  "abba_max_seconds": 7200,
+  "ref_speedup": {
+    "value": 1.5317,
+    "status": "CALIBRATED",
+    "metric": "median ABBA speedup of the ORACLE (reviewer hand-written Triton varlen prefill kernel, swept launch config) over the strong baseline (torch FlashAttention-2 varlen)",
+    "oracle_impl": "solution/ceiling_triton_prefill.py (reviewer-only, NEVER in the image, NEVER run at scoring)",
+    "calibrated_on": "NVIDIA H20, task image v2, 2026-07-26",
+    "n_runs": "1 (authoring, session 2026-07-26) + 3 INDEPENDENT confirmations on an independent session (NVIDIA H20, 2026-07-27)",
+    "raw_values": [
+      1.5317
+    ],
+    "provenance": "authoring measurement of solution/ceiling_triton_prefill.py (reviewer ceiling — hand-written Triton varlen kernel, swept launch config) = 1.5317; >1.0 on all 8 cases, per-case ratios 1.520-1.838",
+    "caveats": "reward.md asks for the median of >= 5 oracle runs; the constant rests on 1 authoring measurement plus 3 independent confirmations (15 paired measurements), agreeing to 0.005%. The measurement noise on this task is exceptionally low (per-pair spread 0.06-0.7%), so further runs would not move the constant.",
+    "legality_check": "ref_speedup 1.5317 >= 1.15 (reward.md 出题合法性约束) PASS",
+    "n_paired_measurements": 15,
+    "confirmation_20260727": {
+      "card": "NVIDIA H20 (torch), image sha256:da1febc5",
+      "oracle_speedups": [
+        1.531336545248246,
+        1.5317816788445673,
+        1.532278365362024
+      ],
+      "median": 1.5317816788445673,
+      "delta_vs_pinned_constant_pct": 0.005,
+      "pair_ratios": [
+        [
+          1.532157,
+          1.531337,
+          1.531105,
+          1.529606,
+          1.53204
+        ],
+        [
+          1.529827,
+          1.524329,
+          1.534294,
+          1.531782,
+          1.532152
+        ],
+        [
+          1.532347,
+          1.531943,
+          1.532363,
+          1.531345,
+          1.532278
+        ]
+      ],
+      "cv_in_run": {
+        "baseline": "0.042-0.094%",
+        "candidate": "0.045-0.255%"
+      },
+      "rewards": [
+        0.4997217064424121,
+        0.500062531561855,
+        0.5004427122753164
+      ],
+      "note": "the pinned constant 1.5317 is CONFIRMED to 0.005% by three fresh runs on an independent session; it was therefore left unchanged."
+    },
+    "hardware_caveat": "此 ref_speedup(=1.5317)在 H20 上标定;若运行硬件与 H20 不一致(GPU 峰值不同),请先用 oracle 实现 solution/ceiling_triton_prefill.py 在本机重新标定该锚点,再计分。",
+    "recalibrate_howto": {
+      "step1_measure": "docker run --rm --gpus all -v \"$PWD/tests:/tests:ro\" -v \"$PWD/solution:/opt/negative:ro\" -e VERIFIER_MODE=ceiling_triton_prefill <image> bash /tests/test.sh",
+      "step2_read": "取 /logs/verifier/benchmark_results.json 里 oracle 的 speedup(建议 >=3 次取中位数)",
+      "step3_write": "把该中位数写回本文件 ref_speedup.value,并更新 status/calibrated_on",
+      "note": "verifier 通过 $NEGATIVE_DIR(默认 /opt/negative)定位 ceiling 实现;模式名 ceiling_triton_prefill 对应文件 solution/ceiling_triton_prefill.py。候选文件名解析顺序: <mode>.py / <bare>.py / negative_<bare>.py"
+    }
+  },
+  "frozen_surface_sha256_history": [
+    {
+      "file": "test.sh",
+      "was": "8c07794c1ea3d2f71293e544cb56c5ba9a1b8efcddc17e8193e447332ab4c9b1",
+      "now": "66023761c094541d67c2bd5c1afb8a8c78f7fb403a82bbd1b0136a2eff0feddf",
+      "why": "reward.md gate 5 (speedup<=1) removed from the loop16 verdict's hard_fails so a correct-but-slower round is no longer reported as 'correctness: FAIL'. Reward semantics unchanged."
+    },
+    {
+      "file": "harness/bench_prefill.py",
+      "was": "e727766b422a5f85e8aaa4be605c67090561ac3adbe8fee7396455d9792c8798",
+      "now": "2d46ccdfe96f5601bc1ad5f51eb55794af8e1aa86641801ec7b2dc03b7104c10",
+      "why": "vacuity sweep: (1) the timing/comparison primitives are now bound to their original function objects BEFORE any candidate module is imported, and _assert_pristine() HARD FAILs if the candidate replaced one - MEASURED: a candidate identical to the strong baseline plus a patched time.perf_counter scored reward 0.718 (speedup 3.9036) with an empty hard_fail_reasons; (2) the timed workload is now MUTATED between timed blocks and the last output written is re-verified, so a memoised/replayed result is stale - MEASURED sol_fraction 9.122 (varlen) / 7.714 (kv) from a replaying candidate that passed every correctness and anti-cheat probe. NOTHING was removed, no tolerance loosened; both additions sit OUTSIDE the timed window so the measured speedup semantics are unchanged (re-anchored after the change)."
+    },
+    {
+      "file": "compute_reward.py",
+      "was": "939a21d27da120aad4db039f16e675fde4dcd41a359dada473d763df7ce0b568",
+      "now": "87b73f018b81558cba318792776ebedf7ff455193edaa73804c59d0ce88ca183",
+      "why": "2026-07-28 vacuity sweep V6: a harness-integrity HardFail now reports the NAMED anti-cheat reason `cheating_harness_tamper` (reward.md 前置门 3) instead of the generic build_or_entry_contract_failed. Reward semantics unchanged (both are 0)."
+    }
+  ]
+}

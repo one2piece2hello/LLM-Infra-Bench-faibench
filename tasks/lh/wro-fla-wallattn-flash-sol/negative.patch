@@ -1,0 +1,33 @@
+--- a/fla/ops/wall_attn/parallel.py
++++ b/fla/ops/wall_attn/parallel.py
+@@ -1,9 +1,7 @@
+-# Windowed decay ("wall") attention forward pass for this repository.
+-# Public entry point: `parallel_wall_attn`. Its signature defines the accepted
+-# tensor shapes, the per-channel decay gate, the optional scalar gate and sink
+-# bias, the window size, and the optional variable-length (`cu_seqlens`) form.
+-# The observable output contract, including the input validation performed
+-# before dispatch, is fixed by the repository's tests.
++# NEGATIVE: wraps the eager reference but ZEROES the per-channel decay gate g,
++# dropping the wall-attention log-decay term (exp2(P_i - P_j) -> 1). The result is
++# plain windowed causal attention without the gate, which diverges from the true
++# windowed-decay output -> fails the correctness parity check.
+ import torch
+ 
+ from fla.ops.wall_attn.naive import naive_wall_attn
+@@ -23,14 +21,9 @@
+ ) -> torch.Tensor:
+     if scale is None:
+         scale = k.shape[-1] ** -0.5
+-    if g_scalar is not None and g_scalar.shape != q.shape[:-1]:
+-        raise ValueError(f"`g_scalar` must be [B, T, HQ] matching q.shape[:-1]; got {g_scalar.shape}")
+-    if cu_seqlens is not None and q.shape[0] != 1:
+-        raise ValueError("`cu_seqlens` (varlen) requires batch size 1")
+-    if sink_bias is not None and sink_bias.shape != (q.shape[2],):
+-        raise ValueError(f"`sink_bias` must be [HQ]; got {sink_bias.shape}")
++    g_broken = torch.zeros_like(g)  # drop the decay gate -> wrong semantics
+     o = naive_wall_attn(
+-        q, k, v, g,
++        q, k, v, g_broken,
+         scale=scale,
+         window_size=window_size,
+         cu_seqlens=cu_seqlens,

@@ -1,0 +1,78 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "nativehist-merge"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "You are working on the metric-aggregation path inside an observability platform."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 21600
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/insea-nativehist-merge-loop16:loop-20260720T122325Z@sha256:a6ee83080e2616e0a470697ef09c455ebd4aa02f235fdbb92774afeeb0aa2099
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-nativehist-merge:oss .`
+[environment]
+docker_image = "fai/kfc-nativehist-merge:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 16000
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timeout_sec = 3600
+task_kind = "acceleration"
+contract_pattern = "A"
+timing_metric = "callgrind_ir"
+candidate_source_root = "/app/repo"
+primary_edit_paths = ["/app/repo/native_histogram_merge.py"]
+forbidden_edit_paths = ["/app/repo/tests/**", "/opt/verifier-*", "/tests/**", "/opt/loop/**"]
+result_paths = [
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+]
+
+[primary_metric]
+name = "native_histogram_merge_ir_speedup"
+goal = "maximize"
+metric_kind = "instruction_count"
+reward_formula = "performance (the reward specification): reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0; matching the oracle scores 0.5, reaching oracle^2 caps at 1.0, range [0,1]. Pre-gates that force reward=0: build/import failure, ANY correctness case fail, anti-cheat trip, forbidden-path edit, speedup<=1, ref_speedup<=1. ONE graded submission only (min=max=1); submit == finalize."
+ref_speedup = 2.58717
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+correctness_gates = [
+    "hidden_case_suite",
+    "normal_overlapping",
+    "normal_disjoint",
+    "boundary_single_hist",
+    "boundary_empty_and_identity",
+    "degenerate_all_same_bucket",
+    "degenerate_sparse_far_apart",
+    "error_mismatched_schema",
+    "error_bad_schema_type",
+    "metamorphic_merge_order_independence",
+    "metamorphic_total_count_conservation",
+    "hidden_manyhists_wide_range",
+    "work_evidence_zero_and_sum",
+    "candidate_reference_agreement",
+    "anti_cheat_forbidden_edit",
+    "forbidden_histogram_or_array_primitive",
+]
+
+[loop]
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+mode = "baked"
+feedback_surface = "/opt/loop/submit.sh"

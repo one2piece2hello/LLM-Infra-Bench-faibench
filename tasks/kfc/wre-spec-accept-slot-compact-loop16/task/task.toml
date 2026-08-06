@@ -1,0 +1,48 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wre-spec-accept-slot-compact-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "Committing the Accepted Prefix of a Verified Draft Tree — Implementation Task"
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wre-spec-accept-slot-compact-loop16:v1@sha256:8a4317ff6b3be8537fb4bb107e2681dc1c479acf086ed7a8be29178f585c7c51
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wre-spec-accept-slot-compact-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wre-spec-accept-slot-compact-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+primary_edit_paths = ["accept_compact.py"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "reward"
+goal = "maximize"
+ref_speedup = 4.896368
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+[loop]
+# NOTE: the /opt/loop harness baked into the image applies its own 3/16 in-session budget; for in-session loop scoring the image is authoritative.
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+# Single-submission policy — min=max=1; the first
+# `bash /opt/loop/submit.sh` IS the final graded submission (submit == finalize).
+declared_submission_policy = "single_submission"

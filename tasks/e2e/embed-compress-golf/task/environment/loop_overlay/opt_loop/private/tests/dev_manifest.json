@@ -1,0 +1,22 @@
+{
+  "_comment": "loop16 DEV-ONLY manifest, read ONLY by /opt/loop/score_engine.sh (it points E2E_MANIFEST_PATH here). This is NOT the graded frozen manifest: it carries the SAME hard-gate thresholds the grade enforces (byte budget / anti-degenerate / plausibility) so the public dev proxy fails for the SAME real reasons, but it deliberately carries NO calibrated anchor -- ref_speedup is null and strong_baseline_ndcg is 0 -- so the per-round signal is a RAW dev nDCG@10, never normalized against the graded anchor. The calibrated strong_baseline_ndcg and ref_speedup VALUES are NOT written anywhere in this image (not here and not in compute_reward.py); they are uploaded fresh to /tests at grading. NB: this file is passed to the verifier process that imports the candidate encoder, so it must never contain an anchor value.",
+  "task_id": "e2e-g2-embed-compress-golf-loop16",
+  "schema": "e2e_manifest_v1_dev_proxy",
+  "thresholds": {
+    "max_bytes_per_vector": 64,
+    "ndcg_k": 10,
+    "refine_shortlist_n": 50,
+    "quality_floor_ndcg": 0.08,
+    "min_plausible_ndcg": 0.02,
+    "strong_baseline_ndcg": 0.0,
+    "embedding_variance_floor": 1e-09,
+    "min_distinct_fraction": 0.8,
+    "max_encode_batch": 256,
+    "refine_max_calls": 6000,
+    "probe_seed": 20240725,
+    "max_corpus_docs": 60000,
+    "max_query_count": 6000,
+    "encode_timeout_sec": 1800,
+    "ref_speedup": null
+  }
+}

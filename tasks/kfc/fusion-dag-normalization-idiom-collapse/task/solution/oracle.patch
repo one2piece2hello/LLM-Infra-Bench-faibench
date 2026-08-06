@@ -1,0 +1,154 @@
+diff --git a/dag_fusion.py b/dag_fusion.py
+index aaa1929..018b938 100644
+--- a/dag_fusion.py
++++ b/dag_fusion.py
+@@ -146,7 +146,7 @@ def _match_canonical(graph, mean_node, cons, prod):
+         return None
+     sq = pow_node["outputs"][0]
+ 
+-    rm2 = prod.get(sq)
++    rm2 = prod.get(_single(cons.get(sq)))
+     if rm2 is None or rm2["op"] != "ReduceMean" or rm2["inputs"] != [sq]:
+         return None
+     var = rm2["outputs"][0]
+@@ -195,7 +195,7 @@ def _match_canonical(graph, mean_node, cons, prod):
+ 
+     eps_val = graph["constants"][eps_name][0]
+     return {"matched": matched_names, "x": x, "weight": weight, "bias": bias,
+-            "y": y, "eps": eps_val}
++            "y": y, "eps": eps_val, "anchor": add_bias["name"]}
+ 
+ 
+ def _single(seq):
+@@ -205,6 +205,86 @@ def _single(seq):
+     return None
+ 
+ 
++_NOOP_OPS = ("Identity", "Cast")
++
++
++def _rewire(nodes, old, new):
++    """Redirect every input edge reading tensor ``old`` to tensor ``new``."""
++    if old == new:
++        return
++    for c in nodes:
++        c["inputs"] = [new if t == old else t for t in c["inputs"]]
++
++
++def _eliminate_noops(nodes, external):
++    """Delete Identity/Cast nodes (numeric no-ops), rewiring their readers to
++    the no-op's own input. When the no-op's output name is an external output
++    we cannot drop the name, so instead we rename the producer's output tensor
++    onto it (only when the producer's old name is not itself needed outside)."""
++    changed = False
++    prod = _producer(nodes)
++    for nd in list(nodes):
++        if nd["op"] not in _NOOP_OPS:
++            continue
++        inp = nd["inputs"][0]
++        out = nd["outputs"][0]
++        if out in external:
++            p = prod.get(inp)
++            if p is None or inp in external:
++                continue  # cannot drop the external name safely
++            p["outputs"] = [out if t == inp else t for t in p["outputs"]]
++            for c in nodes:
++                if c is not nd:
++                    c["inputs"] = [out if t == inp else t for t in c["inputs"]]
++        else:
++            _rewire(nodes, out, inp)
++        nodes.remove(nd)
++        changed = True
++    return changed
++
++
++def _cse(nodes, external):
++    """Merge nodes computing the same value (same op, inputs and attrs).
++    The earliest node survives; if exactly one of the two output names is an
++    external output, that name is kept (renaming the survivor if needed)."""
++    changed = False
++    by_key = {}
++    for nd in list(nodes):
++        key = (nd["op"], tuple(nd["inputs"]),
++               tuple(sorted((k, repr(v)) for k, v in nd.get("attrs", {}).items())))
++        out = nd["outputs"][0]
++        survivor = None
++        for cand in by_key.get(key, ()):
++            if not (out in external and cand["outputs"][0] in external):
++                survivor = cand
++                break
++        if survivor is None:
++            by_key.setdefault(key, []).append(nd)
++            continue
++        s_out = survivor["outputs"][0]
++        keep = out if out in external else s_out
++        if keep != s_out:  # nd's name is external: rename survivor onto it
++            _rewire(nodes, s_out, keep)
++            survivor["outputs"] = [keep if t == s_out else t
++                                   for t in survivor["outputs"]]
++        for c in nodes:
++            if c is not nd:
++                c["inputs"] = [keep if t == out else t for t in c["inputs"]]
++        nodes.remove(nd)
++        changed = True
++    return changed
++
++
++def _normalize(nodes, external):
++    """Rewrite ``nodes`` in place to an equivalent, more canonical form:
++    no numeric no-op nodes and no duplicated computations."""
++    while True:
++        a = _eliminate_noops(nodes, external)
++        b = _cse(nodes, external)
++        if not (a or b):
++            return
++
++
+ def fuse(graph):
+     nodes = [dict(n, inputs=list(n["inputs"]), outputs=list(n["outputs"]),
+                   attrs=dict(n.get("attrs", {}))) for n in graph["nodes"]]
+@@ -212,6 +292,9 @@ def fuse(graph):
+             "constants": {k: list(v) for k, v in graph["constants"].items()},
+             "nodes": nodes}
+ 
++    external = set(work["outputs"])
++    _normalize(nodes, external)
++
+     cons = _consumers(nodes)
+     prod = _producer(nodes)
+     used = set()
+@@ -228,17 +311,22 @@ def fuse(graph):
+     if not matches:
+         return work
+ 
+-    fused_nodes = []
++    anchor_map = {rec["anchor"]: rec for rec in matches}
++    new_nodes = []
+     counter = 0
+-    kept = [n for n in nodes if n["name"] not in used]
+-    for rec in matches:
+-        counter += 1
+-        fused_nodes.append({
+-            "op": "FusedNorm",
+-            "name": "fused_norm_%d" % counter,
+-            "inputs": [rec["x"], rec["weight"], rec["bias"]],
+-            "outputs": [rec["y"]],
+-            "attrs": {"epsilon": rec["eps"]},
+-        })
+-    work["nodes"] = kept + fused_nodes
++    for nd in nodes:
++        if nd["name"] in used:
++            rec = anchor_map.get(nd["name"])
++            if rec is not None:
++                counter += 1
++                new_nodes.append({
++                    "op": "FusedNorm",
++                    "name": "fused_norm_%d" % counter,
++                    "inputs": [rec["x"], rec["weight"], rec["bias"]],
++                    "outputs": [rec["y"]],
++                    "attrs": {"epsilon": rec["eps"]},
++                })
++            continue
++        new_nodes.append(nd)
++    work["nodes"] = new_nodes
+     return work

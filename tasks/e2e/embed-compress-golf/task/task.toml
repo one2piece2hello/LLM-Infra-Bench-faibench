@@ -1,0 +1,122 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "embed-compress-golf"
+bench = "e2e"
+kind = "performance"
+language = "python"
+title = "极致压缩下的向量检索质量（Embedding 压缩金 + 两段精排）"
+ext_id = "e2e-g2-embed-compress-golf"
+difficulty = "hard"
+category = "ml_systems"
+lane = "e2e_task"
+family = "C_quality_budget"
+midtopic = "G2"
+author = "fai-bench"
+tags = [
+    "python",
+    "sentence-transformers",
+    "embedding",
+    "vector-retrieval",
+    "quantization",
+    "binary-quantization",
+    "product-quantization",
+    "two-stage-retrieval",
+    "quality-under-budget",
+    "cpu-only",
+]
+description = "Compress text embeddings into a VERY small per-vector byte budget (small enough that 384-int8 = 384 B does not fit; forces binary/PQ), then optionally re-rank a harness-chosen shortlist with a full-precision/cross-encoder refiner, and maximize held-out retrieval nDCG@10 AFTER refinement. Scored on a BOUNDED [0,1] scale against a strong two-stage compression baseline: only strictly better than that baseline earns anything (matching it or worse = 0), and the score rises as the remaining quality gap is closed. The harness owns the corpus, queries, labels, first-stage search, refinement orchestration, metric, and byte measurement — it re-encodes ITS OWN held-out text."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 21600
+
+# Open-source build: `cd task && docker build -f environment/Dockerfile -t fai/e2e-g2-embed-compress-golf:oss .`
+# provenance (original internal image, not publicly pullable): <internal registry>/kernelbench/e2e-g2-embed-compress-golf-val:v5-timer@sha256:c1e6b29ba12d2cd55e3d2e8af1ecd2d7455081e782a3f9b2404198f2c22aa440
+# 🔁 LOOP16: the shipped image is the loop16 overlay (`crane append` onto the :oss base, purely
+#    additive — /opt/loop + /app/instruction.md only, NOTHING under tests/ changed), so the "1..16
+#    submissions" the instruction promises is REAL. Build it in two steps:
+#      docker build -f environment/Dockerfile             -t fai/e2e-g2-embed-compress-golf:oss .
+#      docker build -f environment/loop_overlay/Dockerfile -t fai/e2e-g2-embed-compress-golf:oss-loop16 environment/loop_overlay
+#    The single-shot form (:oss) is a valid alternative; the graded surface (tests/) is identical in both.
+[environment]
+docker_image = "fai/e2e-g2-embed-compress-golf:oss-loop16"
+dockerfile = "environment/loop_overlay/Dockerfile"
+dockerfile_single_shot = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+# CPU-only ON PURPOSE — MEASURED, not assumed.
+#   This image ships torch 2.13.0+cu130 (CUDA 13.0), which needs a ~580+ NVIDIA driver. It was
+#   probed head-to-head on a CUDA-12.4 GPU host in three arms (identical layers, with and without
+#   the NVIDIA_VISIBLE_DEVICES / NVIDIA_DRIVER_CAPABILITIES image-config hooks) and torch reported
+#   "The NVIDIA driver on your system is too old (found version 12040)" -> CUDA_AVAILABLE False in
+#   every arm. Two independent causes, both real:
+#     1. the base image is a plain Python base and declares none of the NVIDIA container-runtime ENV
+#        hooks, so no device is injected (the hook keys off the IMAGE CONFIG, not session-request env);
+#     2. even with those hooks added, CUDA 13.0 cannot run on a 12.4 driver (cu126 builds can, via
+#        CUDA 12.x minor-version compatibility).
+#   Requesting a GPU would therefore hand the solver an unusable device, and an instruction.md that
+#   promised 「单张 H20」 would make a solver waste submissions on CUDA code paths.
+#   => gpus = 0, and instruction.md states CPU-only + why. Scoring was already CPU-only and
+#   hardware-independent (tests/test.sh pins CUDA_VISIBLE_DEVICES="" and 8 threads), so no reward
+#   semantics change: the frozen constants were calibrated on CPU and still reproduce bit-for-bit.
+#   The CPU pin in test.sh is kept as defence in depth in case a future runtime does expose a card.
+gpus = 0
+storage_mb = 40960
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+# 2026-07-27: raised 3000 -> 5400. One scored pass encodes 8000 held-out docs + 1500 queries with
+# MiniLM and then runs 1500 bounded refiner calls; measured wall time on the CPU lane is
+# ~750-1400 s depending on node contention, so 3000 s left too little headroom and a slow node
+# would have turned a good submission into a spurious 0.
+timeout_sec = 5400
+task_kind = "e2e_optimization"
+submission_root = "/app/submission"
+forbidden_edit_paths = [
+    "tests/compute_reward.py",
+    "tests/test.sh",
+    "tests/heldout_corpus.jsonl",
+    "tests/heldout_queries.jsonl",
+    "tests/heldout_qrels.json",
+    "tests/verifier-correctness-manifest.json",
+    "/opt/verifier",
+    "/opt/verifier-correctness-manifest.json",
+]
+result_paths = [
+    "/logs/verifier/metrics.json",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+]
+restore_paths = [{ from = "artifacts/submission_encoder.py", to = "/app/submission/submission_encoder.py" }, { from = "artifacts/encoder_config.json", to = "/app/submission/encoder_config.json" }]
+
+[verifier.frozen]
+note = "v1 声明不出 primary_edit_paths:整个 repo 可编辑,被计分的交付物在 [verifier].submission_root 下;评分面靠 [verifier].forbidden_edit_paths + tests/test.sh 里的 sha256 门冻结。"
+
+[primary_metric]
+name = "reward"
+goal = "maximize"
+description = "BOUNDED [0,1] reward.md 性能类 envelope: reward = min(1.0, ln(ratio/ref_speedup)/ln(ref_speedup)) if ratio > ref_speedup else 0.0 with ratio = candidate_nDCG@10 / strong_baseline_nDCG@10 (strong baseline = 0.459151) and the frozen authoring-time constant ref_speedup = 1.4290238072817099. 0 at or below the strong baseline, 0.5 at the demonstrated in-budget ceiling, 1.0 only at ratio 2.0421 (unreachable). 0 on any hard-fail (byte budget / anti-degenerate / plausibility / refiner error / frozen-surface tamper). NOTE: `ratio` is a QUALITY ratio at a fixed 64 B/vector budget, not a wall-clock speedup — this task times nothing."
+source = "/logs/verifier/metrics.json"
+ref_speedup = 1.4290238072817099
+ref_speedup_source = "tests/verifier-correctness-manifest.json"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+# loop16: the shipped image bakes /opt/loop; the in-session dev proxy re-runs THIS task's own
+# verifier (compute_reward.py) on the PUBLIC, disjoint /data/retrieval/dev split for a RAW dev
+# nDCG@10 best-of-k ranking signal (NO calibrated anchor, NO held-out qrels baked). At most 16
+# submissions, at least 1; the model decides when to stop (min=1 so --finalize works any time). The
+# graded score is the runner's fresh end-of-session tests/ grade over the hidden split.
+[loop]
+min_submissions = 1
+max_submissions = 16
+submit = "bash /opt/loop/submit.sh"

@@ -1,0 +1,21 @@
+{
+  "max_submissions": 16,
+  "min_submissions": 1,
+  "note": "dev reward is an in-session PUBLIC PROXY: the candidate VarlenPrefillAttention run on the author's PUBLIC dev suite (a byte copy of the model-visible /app/dev_bench/dev_suite.json), gated by the REAL fp32 causal-parity check, and reported as geomean achieved TFLOP/s. Used ONLY to rank best-of-k; the runner end-of-session /tests grade (strong-baseline ABBA over the HIDDEN suite + calibrated anchor) is authoritative. This private tree bakes NO strong-baseline (baseline_prefill.py), NO hidden_suite.json and NO calibrated ref_speedup.",
+  "perf_metric": "reward",
+  "reward_form": "RAW geomean achieved TFLOP/s on the public dev suite (higher is better); monotonic in the graded speedup but NOT normalized against the hidden strong baseline / anchor. correctness is a HARD gate (fp32 causal-parity deviation over tolerance -> 0).",
+  "schema_version": "kernelbench_loop_manifest_v1",
+  "scope": [
+    "submission/varlen_prefill_attn.py"
+  ],
+  "scoring": "dev_eval.py: candidate VarlenPrefillAttention on the PUBLIC /opt/loop/private/tests/dev_suite.json; fp32 causal-parity gate; achieved TFLOP/s",
+  "task_id": "e2e-d1-varlen-prefill-attn-sol-loop16",
+  "gpu_dev_workload_note": "REDUCED workload for the GPU per-round loop: the dev suite is the author's PUBLIC dev bench (3 cases + 3 degenerate edges, modest seq_lens), far smaller than the hidden scored suite, timed with 6 reps x 4 inner calls. A per-round pass completes in seconds on H20 — no full ABBA pairing against a strong baseline is run in the loop (that is the end-of-session grade).",
+  "thresholds": {
+    "dev_suite": "/opt/loop/private/tests/dev_suite.json",
+    "submission_path": "/app/repo/submission/varlen_prefill_attn.py",
+    "timing_reps": 6,
+    "inner_calls": 4,
+    "parity_tol": 0.25
+  }
+}

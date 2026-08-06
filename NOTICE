@@ -1,0 +1,55 @@
+fai_bench
+Copyright 2026 The fai_bench Authors
+
+This product includes software developed by the fai_bench Authors.
+The fai_bench-authored material — task specifications (instruction.md, task.toml),
+graders (tests/**), reference solutions (solution/**), the loop16 harness
+(environment/loop/**, environment/loop_overlay/**), the runner and self-check
+(scripts/**), and documentation — is licensed under the Apache License, Version 2.0
+(see the LICENSE file).
+
+================================================================================
+THIRD-PARTY / VENDORED SOFTWARE
+================================================================================
+
+Many tasks reconstruct a working tree from an UPSTREAM OPEN-SOURCE PROJECT so the
+task is self-contained and byte-reproducible. That upstream code lives under each
+task's `environment/repo/` directory (and, for a few tasks, is fetched at
+`docker build` time from public GitHub by a pinned commit). This vendored /
+fetched upstream code is NOT part of the fai_bench Apache-2.0 grant: it remains
+under its ORIGINAL license and copyright, and each upstream tree retains its own
+LICENSE / COPYING / NOTICE files where the upstream shipped them.
+
+Upstream projects vendored or fetched by these tasks include (non-exhaustive):
+
+  - karpathy/nanoGPT                    (MIT)
+  - pytorch/ao (torchao)               (BSD-3-Clause)
+  - pytorch/torchtitan                 (BSD-3-Clause)
+  - fla-org/flash-linear-attention     (MIT)
+  - ggml-org/llama.cpp                 (MIT)
+  - NVIDIA/Megatron-LM                 (BSD-3-Clause / NVIDIA license; see tree)
+  - hpcaitech/ColossalAI               (Apache-2.0)
+  - vllm-project/vllm                  (Apache-2.0)
+  - triton-lang/triton                 (MIT)
+  - microsoft/DeepSpeed                (Apache-2.0)
+  - huggingface/peft                   (Apache-2.0)
+  - EleutherAI/gpt-neox                (Apache-2.0)
+  - EleutherAI/lm-evaluation-harness   (MIT)
+  - UKPLab/sentence-transformers       (Apache-2.0)
+
+The license label above is a convenience summary; the AUTHORITATIVE license for
+each vendored tree is the LICENSE/COPYING file inside that tree (or, for
+build-time clones, the LICENSE in the pinned upstream commit named in the task's
+environment/Dockerfile). Where a vendored tree carries no LICENSE file, consult
+the upstream repository at the pinned revision.
+
+Model weights and datasets are NOT redistributed in this repository. Tasks that
+need them download them at `docker build` time from their public sources under the
+model/dataset owner's own license, e.g.:
+
+  - Qwen/Qwen2.5-0.5B-Instruct, Qwen/Qwen2.5-1.5B-Instruct   (Apache-2.0, Alibaba)
+  - sentence-transformers/all-MiniLM-L6-v2                   (Apache-2.0)
+  - Salesforce/wikitext (wikitext-103-raw-v1)                (CC-BY-SA-3.0)
+
+Base container images (nvidia/cuda, python, debian) and PyPI/PyTorch wheels pulled
+at build time are governed by their respective licenses.

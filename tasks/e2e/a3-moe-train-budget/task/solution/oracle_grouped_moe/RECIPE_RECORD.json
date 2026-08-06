@@ -1,0 +1,27 @@
+{
+  "note": "REVIEWER-ONLY record of the ORACLE recipe (the reward's 0.5 point). 🔴 NOT harmless if seen and NOT shipped: the shipped starter is the DENSE-at-floor baseline, so this recipe is the answer. It must never enter the image and must never be placed in tests/ (tests/ is uploaded INTO the scored container, where the solver's own training code runs). A REAL strong single-card MoE recipe, never a degraded path.",
+  "recipe": {
+    "model": "single-card MoE-GPT: n_layer=8 n_head=8 n_embd=512 vocab=8192 block=512; per-layer MoE FFN with n_experts=16, top_k=2, ffn_mult=4 (expert hidden=2048). Total params well above the capacity floor; ACTIVE params (top_k=2 experts) keep FLOPs/token low.",
+    "moe_dispatch": "sorted token dispatch + per-expert capacity buffer + batched (grouped) GEMM via torch.bmm over [n_experts, capacity, d] — each expert computes only its routed tokens (real single-card sparsity->throughput).",
+    "load_balancing": "Switch-style auxiliary loss (E * sum_i f_i * P_i) with coef 0.01 + router z-loss coef 1e-3, added to CE at TRAIN time only (the verifier's forward-loss is pure CE).",
+    "capacity_factor": 1.25,
+    "effective_batch": "micro_batch=16 x grad_accum=2 = 32 sequences x 512 tokens (~16k tok/step)",
+    "precision": "bf16 autocast",
+    "optimizer": "fused AdamW lr=3e-3 wd=0.1 betas=(0.9,0.95) grad_clip=1.0",
+    "schedule": "5% warmup then cosine to 0.1x, time-bounded (stops at 0.94*wallclock; the harness timer is the hard cap)",
+    "checkpointing_io": "atomic periodic save every 20s so a timer-kill leaves a valid checkpoint"
+  },
+  "calibration": {
+    "status": "CALIBRATED (frozen in tests/verifier-correctness-manifest.json -> reward_model)",
+    "protocol": ">=5 runs of BOTH the shipped dense starter (=> baseline_bpb) and this oracle (=> oracle_bpb_median) on an NVIDIA H20 through the shipped harness at the frozen wallclock budget; ref_speedup = median(baseline)/median(oracle); the bench reward spec requires ref_speedup >= 1.15.",
+    "baseline_bpb": 1.9550684328299388,
+    "oracle_bpb_median": 1.2747002931075853,
+    "ref_speedup": 1.533747535323529,
+    "hardware": "NVIDIA H20; see reward_model.hardware_and_data_caveat in the frozen manifest before scoring on other hardware"
+  },
+  "gradient_probe": {
+    "naive_negative": "solution/naive: SAME MoE model (clears the floor + anti-spoof) but a NAIVE per-expert loop that runs every expert on every token (DENSE FLOPs) + no load-balancing loss -> far fewer steps in the budget + router collapse -> higher val_bpb -> reward < 1.0.",
+    "expected": "naive_val_bpb > strong_baseline_bpb (reward<1) ; a stronger candidate (better grouped-GEMM/dispatch, tuned top_k/capacity/aux, bigger effective batch from the throughput headroom) < strong_baseline_bpb (reward>1). MEASURED before shipping."
+  },
+  "role": "oracle (ref_speedup denominator)"
+}

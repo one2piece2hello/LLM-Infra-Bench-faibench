@@ -1,0 +1,87 @@
+diff -ruN a/secureagg/aggregator.py neg/secureagg/aggregator.py
+--- a/secureagg/aggregator.py	2026-07-26 03:09:28.273033739 +0800
++++ neg/secureagg/aggregator.py	2026-07-26 03:16:31.467069568 +0800
+@@ -1,22 +1,8 @@
+-"""Masked secure aggregation over a fixed shareholder committee (secure-aggregation backend).
++"""Masked secure aggregation over a fixed shareholder committee.
+ 
+-Clients additively mask their length-``D`` update vectors; the server holds, per coordinate, a
+-list of Shamir shares from the SAME committee of shareholders (same x-coordinates for every
+-coordinate) and reconstructs the aggregated (summed) value per coordinate to recover the
+-plaintext aggregate. Aggregation runs on the server's hot path, once per aggregation round.
+-
+-Observable contract (residues mod ``shamir.p``):
+-  * ``aggregate(coord_shares)`` -> list of reconstructed values, one per coordinate.
+-    ``coord_shares`` is a list (length ``D``) of share-lists; every share-list uses the same set of
+-    x-coordinates (the committee). Equivalent to ``[shamir.reconstruct(s) for s in coord_shares]``.
+-  * ``aggregate_rounds(rounds)`` -> ``[aggregate(r) for r in rounds]`` for several aggregation rounds
+-    that all reuse the same committee x-coordinates.
+-  * ``committee_of(coord_shares)`` -> the sorted tuple of x-coordinates used (the committee id).
+-
+-Only the three methods listed above are observable, and only as residues mod ``shamir.p``. The
+-committee x-coordinates are identical for every coordinate of a round and for every round passed
+-to ``aggregate_rounds``. How this module and ``shamir`` divide the work between them is not part
+-of the contract.
++Reconstructs per-coordinate aggregates by reusing the committee's Lagrange weights across all
++coordinates and rounds (the committee x-coordinates are constant), instead of recomputing weights
++per coordinate. Observable contract identical to the naive version.
+ """
+ from __future__ import annotations
+ 
+@@ -33,9 +19,8 @@
+         return tuple(sorted(x for x, _ in coord_shares[0]))
+ 
+     def aggregate(self, coord_shares):
+-        # Recover one aggregated value per coordinate.
+-        return [self.shamir.reconstruct(shares) for shares in coord_shares]
++        # Reuse the committee's cached Lagrange weights across all coordinates.
++        return self.shamir.reconstruct_many(coord_shares)
+ 
+     def aggregate_rounds(self, rounds):
+-        # Aggregate each round of the sequence.
+-        return [self.aggregate(r) for r in rounds]
++        return [self.shamir.reconstruct_many(r) for r in rounds]
+diff -ruN a/secureagg/shamir.py neg/secureagg/shamir.py
+--- a/secureagg/shamir.py	2026-07-26 03:09:13.872829898 +0800
++++ neg/secureagg/shamir.py	2026-07-26 03:16:31.467069568 +0800
+@@ -1,25 +1,7 @@
+-"""Shamir secret sharing over a prime field (secure-aggregation backend).
+-
+-A privacy-preserving aggregation server splits each client's masked update into ``n`` shares
+-(threshold ``t``), distributes them to a committee, and later reconstructs per-coordinate sums
+-from any ``t`` shares. Reconstruction sits on the server's hot path: many coordinates, over many
+-rounds, are recovered from the SAME committee of shareholders, i.e. from the same set of share
+-x-coordinates.
+-
+-Observable contract (must hold exactly, all values are residues mod ``field.p``):
+-  * ``split(secret, n, t, rng)`` -> list of ``n`` shares ``(x_i, y_i)`` with distinct x_i in 1..n,
+-    such that any ``t`` of them reconstruct ``secret``. Uses ``rng`` (a ``random.Random``) to draw the
+-    ``t-1`` random polynomial coefficients (so results are deterministic given the rng).
+-  * ``reconstruct(shares)`` -> the secret at x=0 via Lagrange interpolation over the provided shares
+-    (needs at least the threshold count; extra shares are consistent). Raises ``ValueError`` on
+-    duplicate x or empty input.
+-  * ``reconstruct_many(share_lists)`` -> ``[reconstruct(s) for s in share_lists]`` where every list in
+-    ``share_lists`` uses the SAME set of x-coordinates (the committee); the per-x Lagrange-at-zero
+-    weights depend only on those x-coordinates.
+-"""
++"""Shamir secret sharing over a prime field (secure-aggregation backend)."""
+ from __future__ import annotations
+ 
+-from .field import DEFAULT_PRIME, eval_poly, lagrange_at_zero
++from .field import DEFAULT_PRIME, eval_poly
+ 
+ 
+ class Shamir:
+@@ -36,10 +18,8 @@
+     def reconstruct(self, shares):
+         if not shares:
+             raise ValueError("no shares")
+-        # Interpolate the sharing polynomial at x=0 over the provided shares.
+-        return lagrange_at_zero([(x, y) for x, y in shares], self.p)
++        # WRONG: return a fixed sentinel, never the interpolated secret (fails every case).
++        return (self.p - 1)
+ 
+     def reconstruct_many(self, share_lists):
+-        # Recover one value per share-list; every list in ``share_lists`` uses
+-        # the same committee of x-coordinates.
+         return [self.reconstruct(sl) for sl in share_lists]

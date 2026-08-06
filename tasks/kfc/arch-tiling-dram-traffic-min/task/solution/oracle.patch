@@ -1,0 +1,97 @@
+diff --git a/tile_planner.py b/tile_planner.py
+index 033e360..0a09952 100644
+--- a/tile_planner.py
++++ b/tile_planner.py
+@@ -1,59 +1,9 @@
+-"""Tile-size planning for a blocked matrix-multiply pipeline.
++"""ORACLE (reviewer-only, NOT baked): exhaustive minimum-traffic valid tiling.
+ 
+-Public entry point:
+-    ``plan_tiling(problems, cap) -> [[Tm, Tn, Tk], ...]``
+-
+-Each *problem* is one matrix multiply ``C[M,N] += A[M,K] * B[K,N]`` that runs as a
+-blocked loop nest over tiles of shape ``Tm x Tn`` (of C), reading ``Tm x Tk`` blocks of
+-A and ``Tk x Tn`` blocks of B. A block of C is kept on chip and accumulated across the
+-K dimension, so the off-chip data moved by one problem is::
+-
+-    moved = esz * ( M*K*(N//Tn)  +  K*N*(M//Tm)  +  2*M*N )
+-
+-(the A operand is streamed once for every column-block of C -> ``N//Tn`` times, the B
+-operand once for every row-block of C -> ``M//Tm`` times, and C is read and written
+-once). Larger ``Tm`` / ``Tn`` move less data; the on-chip buffer must hold one block of
+-each of A, B and C at once::
+-
+-    footprint = (Tm*Tk + Tk*Tn + Tm*Tn) * esz   <=   cap
+-
+-``plan_tiling`` returns, for every problem in order, a chosen ``[Tm, Tn, Tk]``.
+-
+-Problem schema
+---------------
+-``problems`` is a list of mappings, each with:
+-
+-* ``"M"``, ``"N"``, ``"K"``: positive int dimensions.
+-* ``"esz"``: positive int element size in bytes.
+-* ``"tm_choices"``, ``"tn_choices"``, ``"tk_choices"``: non-empty lists of the allowed
+-  tile sizes for that axis. Every ``Tm`` choice must divide ``M`` exactly (``M % Tm ==
+-  0``), every ``Tn`` divide ``N``, every ``Tk`` divide ``K``.
+-
+-``cap`` is the on-chip buffer capacity in bytes (a positive int), shared by all
+-problems.
+-
+-What a valid plan must satisfy
+-------------------------------
+-For every problem the returned ``[Tm, Tn, Tk]`` must (a) be drawn from that problem's
+-respective choice lists, and (b) fit the capacity: ``(Tm*Tk + Tk*Tn + Tm*Tn) * esz <=
+-cap``. A plan that picks a tile outside the choices, or one that does not fit, is
+-INVALID and scores zero. (A valid choice always exists: the smallest tile of each axis
+-fits, because the choices always include a tile whose footprint is within ``cap``.)
+-
+-Error contract
+---------------
+-``ValueError`` if a problem is malformed: a non-positive / non-int dimension or ``esz``;
+-an empty choice list; a ``Tm`` choice that does not divide ``M`` (likewise Tn/Tk); a
+-non-positive ``cap``. ``TypeError`` for a non-int where an int is required (a ``bool``
+-is rejected).
+-
+-Why the current implementation is wasteful
+--------------------------------------------
+-This baseline picks the SMALLEST tile of each axis for every problem. That always fits
+-the buffer, but tiny tiles stream the A and B operands the maximum number of times, so
+-the total off-chip data moved is far larger than necessary. Choose larger tiles that
+-still fit the buffer so each operand is streamed fewer times, while keeping every
+-choice valid (from the lists, and within ``cap``).
++Full replacement for tile_planner.py. Same validation; for each problem it searches all
++(Tm,Tn,Tk) combinations from the choice lists, discards those that exceed the on-chip
++capacity, and keeps the one with the least modeled off-chip traffic (tie-break: larger
++tiles). Lowest traffic among valid plans -> highest speedup.
+ """
+ 
+ 
+@@ -95,14 +45,20 @@ def _validate(problems, cap):
+ 
+ 
+ def plan_tiling(problems, cap):
+-    """Frozen baseline (candidate start state).
+-
+-    Picks the smallest tile of every axis for every problem: always valid (smallest
+-    footprint fits ``cap``) but moves the most off-chip data because the operands are
+-    streamed the maximum number of times. Return larger, still-fitting tiles instead.
+-    """
+     norm = _validate(problems, cap)
+     plan = []
+     for (M, N, K, esz, tm, tn, tk) in norm:
+-        plan.append([min(tm), min(tn), min(tk)])  # smallest tiles -> maximal traffic
++        best_tile = None
++        best_key = None
++        for Tm in tm:
++            for Tn in tn:
++                for Tk in tk:
++                    if (Tm * Tk + Tk * Tn + Tm * Tn) * esz > cap:
++                        continue
++                    traf = esz * (M * K * (N // Tn) + K * N * (M // Tm) + 2 * M * N)
++                    key = (traf, -Tm, -Tn, -Tk)
++                    if best_key is None or key < best_key:
++                        best_key = key
++                        best_tile = [Tm, Tn, Tk]
++        plan.append(best_tile)
+     return plan

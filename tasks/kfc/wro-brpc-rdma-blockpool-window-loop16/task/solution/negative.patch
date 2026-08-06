@@ -1,0 +1,483 @@
+--- a/brpc_rdma_pool_window.py
++++ b/brpc_rdma_pool_window.py
+@@ -48,9 +48,9 @@
+ 
+ Implementation note
+ -------------------
+-This implementation is the SLOW-BUT-CORRECT reference path: it is what the
+-plans are checked against, and every routine here is written the most obvious
+-way rather than the fastest one.
++This implementation is the Optimised path: every routine here is written to
++do each piece of work once, and it agrees element for element and byte for
++byte with the obvious reference.
+ """
+ 
+ BYTES_IN_MB = 1048576
+@@ -115,12 +115,8 @@
+                          % (buckets, MIN_BUCKETS, MAX_BUCKETS))
+     raw = size_mb * BYTES_IN_MB
+     step = BLOCK_SIZES[block_type] * buckets
+-    # SLOW: the usable size is just `raw - raw % step`, but this walks up to
+-    # SLOW: the answer one whole stripe at a time, so the cost grows with the
+-    # SLOW: number of blocks in the region instead of being constant.
+-    total = 0
+-    while total + step <= raw:
+-        total += step
++    # Optimised path: the truncation is one division.
++    total = (raw // step) * step
+     if total == 0:
+         raise ValueError("region of %d MB holds no block of tier %d"
+                          % (size_mb, block_type))
+@@ -154,25 +150,27 @@
+     if size % BLOCK_SIZES[block_type] != 0:
+         raise ValueError("region size %d is not a multiple of block %d"
+                          % (size, BLOCK_SIZES[block_type]))
+-    # SLOW: the table is already sorted, so a new region can only overlap the
+-    # SLOW: one region on either side of its insertion point.  This compares
+-    # SLOW: against every registered region instead.
+-    for other in regions:
+-        if start < other["start"] + other["size"] and other["start"] < start + size:
+-            raise ValueError("region [%d, %d) overlaps [%d, %d)"
+-                             % (start, start + size,
+-                                other["start"], other["start"] + other["size"]))
++    # Optimised path: bisect for the insertion point, then only the neighbour
++    # on either side of it can possibly overlap.
++    lo = 0
++    hi = len(regions)
++    while lo < hi:
++        mid = (lo + hi) // 2
++        if regions[mid]["start"] < start:
++            lo = mid + 1
++        else:
++            hi = mid
++    for j in (lo - 1, lo):
++        if 0 <= j < len(regions):
++            other = regions[j]
++            if start < other["start"] + other["size"] and other["start"] < start + size:
++                raise ValueError("region [%d, %d) overlaps [%d, %d)"
++                                 % (start, start + size,
++                                    other["start"], other["start"] + other["size"]))
+     lkey = table["next_lkey"]
+     table["next_lkey"] = lkey + 1
+-    entry = {"start": start, "size": size, "block_type": block_type, "lkey": lkey}
+-    regions.append(entry)
+-    # SLOW: re-sorting the whole table by walking it back into place is an
+-    # SLOW: insertion sort; the insertion point could be found directly
+-    # SLOW: because the prefix is already ordered.
+-    i = len(regions) - 1
+-    while i > 0 and regions[i - 1]["start"] > regions[i]["start"]:
+-        regions[i - 1], regions[i] = regions[i], regions[i - 1]
+-        i -= 1
++    regions.insert(lo, {"start": start, "size": size,
++                        "block_type": block_type, "lkey": lkey})
+     return lkey
+ 
+ 
+@@ -182,13 +180,22 @@
+         raise ValueError("table must be a region table")
+     if not isinstance(addr, int) or isinstance(addr, bool):
+         raise ValueError("addr must be an int, got %r" % (addr,))
+-    # SLOW: the region list is sorted by start and the regions are disjoint,
+-    # SLOW: so the containing region can be found by bisecting on the starts.
+-    # SLOW: This walks every region on every single lookup, and this function
+-    # SLOW: is called at least once per block allocated, freed or posted.
+-    for entry in table["regions"]:
+-        if entry["start"] <= addr < entry["start"] + entry["size"]:
+-            return entry
++    # Optimised path: the regions are sorted and disjoint, so the only
++    # candidate is the last one whose start does not exceed addr.
++    regions = table["regions"]
++    lo = 0
++    hi = len(regions)
++    while lo < hi:
++        mid = (lo + hi) // 2
++        if regions[mid]["start"] < addr:
++            lo = mid + 1
++        else:
++            hi = mid
++    if lo == 0:
++        return None
++    entry = regions[lo - 1]
++    if addr < entry["start"] + entry["size"]:
++        return entry
+     return None
+ 
+ 
+@@ -208,11 +215,8 @@
+     entry = region_of(table, addr)
+     if entry is None:
+         raise ValueError("address %d is not in any region" % addr)
+-    # SLOW: `entry` above already holds the start and size; resolving the same
+-    # SLOW: address twice more doubles and triples the scan above.
+-    start = region_of(table, addr)["start"]
+-    size = region_of(table, addr)["size"]
+-    return ((addr - start) * buckets) // size
++    # Optimised path: one resolution is enough.
++    return ((addr - entry["start"]) * buckets) // entry["size"]
+ 
+ 
+ def _lcg_next(pool):
+@@ -334,9 +338,8 @@
+     if block_type == 0 and pool["tls"] is not None:
+         node = pool["tls"]
+         pool["tls"] = node["next"]
+-        # SLOW: the cache count is maintained exactly, so this is just
+-        # SLOW: `pool["tls_num"] -= 1`; recounting walks the whole cache.
+-        pool["tls_num"] = _list_len(pool["tls"])
++        # Optimised path: the count is exact, so decrement it.
++        pool["tls_num"] -= 1
+         pool["allocated"] += 1
+         return node["start"]
+ 
+@@ -360,26 +363,23 @@
+         node["len"] = node["len"] - bs
+     else:
+         pool["idle"][block_type][index] = node["next"]
+-    # SLOW: exactly `bs` bytes just left this bucket, so the running total
+-    # SLOW: could be decremented; instead the whole bucket is re-summed, which
+-    # SLOW: makes every allocation cost as much as the bucket is long.
+-    pool["idle_size"][block_type][index] = _list_bytes(
+-        pool["idle"][block_type][index])
++    # Optimised path: exactly bs bytes left this bucket.
++    pool["idle_size"][block_type][index] -= bs
+ 
+     if block_type == 0:
+         node = pool["idle"][0][index]
+         pool["tls"] = node
+         last_node = None
++        moved = 0
++        limit = pool["tls_cache_num"] // 2
+         while node is not None:
+-            if pool["tls_num"] > pool["tls_cache_num"] // 2 or node["len"] > bs:
++            if moved > limit or node["len"] > bs:
+                 break
+-            # SLOW: one more node joined the cache, so the count is just
+-            # SLOW: `+= 1`; recounting inside the refill loop turns a linear
+-            # SLOW: bulk transfer into a quadratic one.
++            moved += 1
+             last_node = node
+             node = node["next"]
+-            pool["tls_num"] = _list_len(pool["tls"]) - _list_len(node)
+-        if pool["tls_num"] == 0:
++        pool["tls_num"] = moved
++        if moved == 0:
+             pool["tls"] = None
+         else:
+             pool["idle"][0][index] = node
+@@ -434,24 +434,16 @@
+     index = ((addr - entry["start"]) * pool["buckets"]) // entry["size"]
+     if block_type == 0:
+         num = pool["tls_cache_num"] // 2
+-        # SLOW: the tail of the batch and its byte count both fall out of one
+-        # SLOW: walk of `num` nodes.  Restarting the walk from the head for
+-        # SLOW: every position makes the batch cost quadratic in its size.
++        # Optimised path: the tail and the byte count both fall out of a
++        # single walk of num nodes.
+         recycle_tail = None
+-        for i in range(num):
+-            step = pool["tls"]
+-            for _ in range(i):
+-                step = step["next"]
+-            recycle_tail = step
+         length = 0
+-        for i in range(num):
+-            step = pool["tls"]
+-            for _ in range(i):
+-                step = step["next"]
+-            length += step["len"]
+-        new_head = pool["tls"]
++        step = pool["tls"]
+         for _ in range(num):
+-            new_head = new_head["next"]
++            recycle_tail = step
++            length += step["len"]
++            step = step["next"]
++        new_head = step
+         if recycle_tail is not None:
+             recycle_tail["next"] = node
+             node["next"] = pool["idle"][0][index]
+@@ -472,26 +464,25 @@
+         raise ValueError("pool must be a block pool")
+     tiers = []
+     for bt in range(BLOCK_SIZE_COUNT):
+-        # SLOW: four separate walks of the same lists.  Every one of these
+-        # SLOW: numbers is available from a single pass over each bucket.
++        # Optimised path: one walk of each list feeds every counter.
+         chunks = 0
+-        for i in range(pool["buckets"]):
+-            chunks += _list_len(pool["idle"][bt][i])
+         idle_bytes = 0
+-        for i in range(pool["buckets"]):
+-            idle_bytes += _list_bytes(pool["idle"][bt][i])
++        max_chunk = 0
+         exp_chunks = 0
+-        for i in range(pool["buckets"]):
+-            exp_chunks += _list_len(pool["expansion"][bt][i])
+         exp_bytes = 0
+         for i in range(pool["buckets"]):
+-            exp_bytes += _list_bytes(pool["expansion"][bt][i])
+-        max_chunk = 0
+-        for i in range(pool["buckets"]):
+             step = pool["idle"][bt][i]
+             while step is not None:
+-                if step["len"] > max_chunk:
+-                    max_chunk = step["len"]
++                chunks += 1
++                n = step["len"]
++                idle_bytes += n
++                if n > max_chunk:
++                    max_chunk = n
++                step = step["next"]
++            step = pool["expansion"][bt][i]
++            while step is not None:
++                exp_chunks += 1
++                exp_bytes += step["len"]
+                 step = step["next"]
+         tiers.append({
+             "tier": TIER_NAMES[bt],
+@@ -617,9 +608,16 @@
+     max_sge = state["max_sge"]
+     local_cap = state["local_cap"]
+     remote_cap = state["remote_cap"]
+-
+-    emitted = [[] for _ in range(ndata)]
++    unsol_limit = local_cap // 4
++    ack_limit = remote_cap // 4
++    sig_limit = local_cap // 4
++    ring = state["sq_size"] - RESERVED_WR_NUM
++
++    # Optimised path: carry the per-message offsets forward instead of
++    # rebuilding them, and append in place.
++    offsets = [0] * ndata
+     wrs = []
++    consumed = 0
+     total_len = 0
+     current = 0
+     rrw = state["remote_rq_window"]
+@@ -632,25 +630,15 @@
+                     "consumed": 0, "messages": ndata}
+         slot = state["sq_current"]
+         sges = []
+-        while True:
+-            # SLOW: both of these are running totals that the loop could carry
+-            # SLOW: forward, but they are rebuilt from the emitted lists on
+-            # SLOW: every scatter/gather entry, so filling one work request
+-            # SLOW: costs the square of the number of entries in it.
+-            this_len = 0
+-            for sge in sges:
+-                this_len += sge[1]
+-            if len(sges) >= max_sge or this_len >= recv_block:
+-                break
+-            off = 0
+-            for sge in emitted[current]:
+-                off += sge[1]
+-            if off >= msgs[current]["len"]:
++        this_len = 0
++        while len(sges) < max_sge and this_len < recv_block:
++            m = msgs[current]
++            off = offsets[current]
++            if off >= m["len"]:
+                 current += 1
+                 if current == ndata:
+                     break
+                 continue
+-            m = msgs[current]
+             room = m["block"] - (off % m["block"])
+             take = m["len"] - off
+             if room < take:
+@@ -663,27 +651,21 @@
+             if lkey == 0:
+                 raise ValueError("message %d address %d is not registered"
+                                  % (current, addr))
+-            # SLOW: rebuilding the list for every entry copies everything that
+-            # SLOW: is already in it; appending in place does not.
+-            sges = sges + [(addr, take, lkey)]
+-            emitted[current] = emitted[current] + [(addr, take, lkey)]
+-        this_len = 0
+-        for sge in sges:
+-            this_len += sge[1]
++            sges.append((addr, take, lkey))
++            offsets[current] = off + take
++            this_len += take
++            consumed += take
+         if this_len == 0:
+             continue
+ 
+         imm = state["new_rq_wrs"]
+         state["new_rq_wrs"] = 0
+-        # SLOW: `current + 1 >= ndata` says the same thing without materialising
+-        # SLOW: a list of every message index still behind the cursor.
+-        tail = [i for i in range(ndata) if i > current]
+         solicited = False
+-        if rrw == 1 or sqw == 1 or len(tail) == 0:
++        if rrw == 1 or sqw == 1 or current + 1 >= ndata:
+             solicited = True
+-        elif state["unsolicited"] > local_cap // 4:
++        elif state["unsolicited"] >= unsol_limit:
+             solicited = True
+-        elif state["accumulated_ack"] > remote_cap // 4:
++        elif state["accumulated_ack"] > ack_limit:
+             solicited = True
+         elif state["unsolicited_bytes"] > UNSOLICITED_BYTE_LIMIT:
+             solicited = True
+@@ -696,30 +678,28 @@
+             state["unsolicited_bytes"] = 0
+             state["accumulated_ack"] = 0
+ 
+-        state["sq_unsignaled"] += 1
++        unsignaled = state["sq_unsignaled"] + 1
+         signaled = False
+         wr_id = 0
+-        if state["sq_unsignaled"] >= local_cap // 4:
++        if unsignaled >= sig_limit:
+             signaled = True
+-            wr_id = state["sq_unsignaled"]
+-            state["sq_unsignaled"] = 0
++            wr_id = unsignaled
++            unsignaled = 0
++        state["sq_unsignaled"] = unsignaled
+ 
+         wrs.append({"slot": slot, "num_sge": len(sges), "bytes": this_len,
+                     "imm": imm, "solicited": solicited, "signaled": signaled,
+                     "wr_id": wr_id, "sges": sges})
+         total_len += this_len
+         state["posted"] += 1
+-        state["sq_current"] += 1
+-        if state["sq_current"] == state["sq_size"] - RESERVED_WR_NUM:
+-            state["sq_current"] = 0
++        nxt = slot + 1
++        if nxt == ring:
++            nxt = 0
++        state["sq_current"] = nxt
+         rrw -= 1
+         sqw -= 1
+     state["remote_rq_window"] = rrw
+     state["sq_window"] = sqw
+-    consumed = 0
+-    for lst in emitted:
+-        for sge in lst:
+-            consumed += sge[1]
+     return {"wrs": wrs, "total_len": total_len, "eagain": False,
+             "consumed": consumed, "messages": ndata}
+ 
+@@ -765,50 +745,39 @@
+             raise ValueError("events[%d] must be a dict with 'kind'" % i)
+         if ev["kind"] not in EVENT_NAMES:
+             raise ValueError("events[%d] has bad kind %r" % (i, ev["kind"]))
+-    # SLOW: one pass per event kind over the same list; a single pass can bump
+-    # SLOW: both counters.
++    # Optimised path: one pass, a set for the slots, one region lookup per
++    # receive event.
+     n_send = 0
+-    for ev in events:
+-        if ev["kind"] == "send":
+-            n_send += 1
+     n_recv = 0
+-    for ev in events:
+-        if ev["kind"] == "recv":
+-            n_recv += 1
+-
+     credits = 0
+     reposted = 0
+     acks = 0
+     bad_lkey = 0
+-    seen_slots = []
++    seen_slots = set()
++    local_cap = state["local_cap"]
+     for ev in events:
+         if ev["kind"] == "send":
++            n_send += 1
+             got = ev.get("wr_id", 0)
+             if not isinstance(got, int) or isinstance(got, bool) or got < 0:
+                 raise ValueError("send event has bad wr_id %r" % (got,))
+-            room = state["local_cap"] - state["sq_window"]
++            room = local_cap - state["sq_window"]
+             if got > room:
+                 got = room
+             state["sq_window"] += got
+             credits += got
+-            # SLOW: a set membership test is constant time; scanning the list
+-            # SLOW: of slots seen so far makes this quadratic in the batch.
+-            if ev.get("slot", -1) not in seen_slots:
+-                seen_slots = seen_slots + [ev.get("slot", -1)]
++            seen_slots.add(ev.get("slot", -1))
+         else:
++            n_recv += 1
+             imm = ev.get("imm", 0)
+             if not isinstance(imm, int) or isinstance(imm, bool) or imm < 0:
+                 raise ValueError("recv event has bad imm %r" % (imm,))
+-            room = state["local_cap"] - state["remote_rq_window"]
++            room = local_cap - state["remote_rq_window"]
+             if imm > room:
+                 imm = room
+             state["remote_rq_window"] += imm
+-            addr = ev.get("addr", 0)
+-            # SLOW: one lookup is enough -- the second and third calls repeat
+-            # SLOW: the whole region scan to learn nothing new.
+-            if region_lkey(table, addr) == 0:
+-                bad_lkey += 1
+-            elif region_of(table, addr) is None or region_lkey(table, addr) == 0:
++            entry = region_of(table, ev.get("addr", 0))
++            if entry is None:
+                 bad_lkey += 1
+             else:
+                 reposted += 1
+@@ -828,42 +797,32 @@
+                 "solicited": 0, "signaled": 0, "signal_bytes": 0,
+                 "imm_total": 0, "distinct_slots": 0, "max_bytes": 0,
+                 "first_slot": -1, "last_slot": -1}
+-    # SLOW: eight separate passes over the same plan.  Every one of these
+-    # SLOW: numbers can be folded in a single walk.
++    # Optimised path: one walk, a set for the slots.
+     total_bytes = 0
+-    for wr in wrs:
+-        total_bytes += wr["bytes"]
+     sge_count = 0
+-    for wr in wrs:
+-        sge_count += wr["num_sge"]
+     max_sge = 0
+-    for wr in wrs:
+-        if wr["num_sge"] > max_sge:
+-            max_sge = wr["num_sge"]
+     solicited = 0
+-    for wr in wrs:
+-        if wr["solicited"]:
+-            solicited += 1
+     signaled = 0
+     signal_bytes = 0
++    imm_total = 0
++    max_bytes = 0
++    slots = set()
+     for wr in wrs:
++        nb = wr["bytes"]
++        total_bytes += nb
++        ns = wr["num_sge"]
++        sge_count += ns
++        if ns > max_sge:
++            max_sge = ns
++        if wr["solicited"]:
++            solicited += 1
+         if wr["signaled"]:
+             signaled += 1
+-    for wr in wrs:
+-        if wr["signaled"]:
+-            signal_bytes += wr["bytes"]
+-    imm_total = 0
+-    for wr in wrs:
++            signal_bytes += nb
+         imm_total += wr["imm"]
+-    max_bytes = 0
+-    for wr in wrs:
+-        if wr["bytes"] > max_bytes:
+-            max_bytes = wr["bytes"]
+-    # SLOW: list membership again where a set would do.
+-    slots = []
+-    for wr in wrs:
+-        if wr["slot"] not in slots:
+-            slots = slots + [wr["slot"]]
++        if nb > max_bytes:
++            max_bytes = nb
++        slots.add(wr["slot"])
+     return {"wr_count": len(wrs), "total_bytes": total_bytes,
+             "sge_count": sge_count, "max_sge": max_sge,
+             "solicited": solicited, "signaled": signaled,

@@ -1,0 +1,229 @@
+{
+  "_comment": "FROZEN evaluation surface -- reviewer-only, uploaded FRESH under /tests at scoring and NOT baked into the task image. the baked root-0700 /opt/verifier copy of this manifest, of compute_reward.py and of heldout_samples.jsonl was REMOVED from the image (the container runs as uid 0, so root-0700 was no protection); the held-out sample set now ships with tests/ and its sha256 is pinned in thresholds.heldout_samples_sha256 so the timed workload is provably the one ref_speedup was calibrated on. compute_reward.py reads thresholds from here.",
+  "task_id": "e2e-h3-eval-harness-throughput-quality",
+  "schema": "e2e_manifest_v1",
+  "repo_baked": "EleutherAI/lm-evaluation-harness",
+  "source_commit_app_repo": "97a5e2c710e2b56b9dd48f367bb6fe87bbb2c176",
+  "compute_reward_sha256": "fe8cf474296bf0491f084597f7c99a0c3658e47ddb9599be9076d57c7d4ed627",
+  "heldout_data_provenance": "Synthetic-but-realistic lm-eval scoring records generated deterministically at Docker build (build_dataset.py) from a fixed seed: each record is one eval instance carrying the harness-produced model OUTPUTS (generated text or per-choice loglikelihoods), the requested filter pipeline (regex extraction + take_first / majority_vote), the metric name (exact_match / contains / prefix_match / loglikelihood_acc), and the gold target. The agent-visible DEV split under /data is a DISJOINT sample pool with the SAME schema. The HELD-OUT split's gold + ids ship ONLY with the fresh tests/ upload at scoring (byte-identical to the authoring-time build output, sha256 pinned in thresholds.heldout_samples_sha256) and are never present in the task image at all.",
+  "thresholds": {
+    "score_atol": 1e-09,
+    "min_consistency_fraction": 1.0,
+    "strong_baseline_time_sec": 0.174827,
+    "timing_repeats": 5,
+    "min_speedup_plausible": 0.05,
+    "max_score_time_sec": 900,
+    "anti_cache_perturb_frac": 0.25,
+    "probe_seed": 20240725,
+    "max_samples": 200000,
+    "ref_speedup": 2.24419,
+    "abba_pairs": 6,
+    "heldout_samples_sha256": "b387c1747ee312ac400ebf7e9ea5138cf336a57b0d8b661448f3193cff61eb55"
+  },
+  "calibration_record": {
+    "calibrated_on": "CPU-only session, 8 vCPU / 32 GiB, gpus=0 (Intel Sapphire Rapids)",
+    "val_image": "<internal registry>/kernelbench/e2e-h3-eval-harness-throughput-quality-val:v0@sha256:22592cb08e0f6d1c34ab42bdb1c9172411a70638bf57895c0ec090e7b3ca1ab2",
+    "date": "2026-07-26",
+    "protocol": "VERIFIER_MODE=strong_baseline through tests/test.sh 3x;每次调用本身已经是 timing_repeats=5 次计时的中位数，所以锚点是 median-of-medians。整条阶梯（起步模板 / 负控 / 三个 ceiling）在同一 session、同一台机器上量，保证与锚点可比。",
+    "strong_baseline_time_sec_runs": [
+      0.174827,
+      0.175192,
+      0.168863
+    ],
+    "strong_baseline_time_sec": 0.174827,
+    "spread_pct_of_median": 3.62,
+    "ladder_measured_same_host": {
+      "starter_template": {
+        "time_sec": 0.179961,
+        "speedup_vs_anchor": 0.9715,
+        "consistency_fraction": 1.0,
+        "matched": 20000,
+        "mismatched": 0,
+        "all_hard_gates_pass": true,
+        "what": "镜像里发的起步模板（逐行 Python 循环，正确但慢）"
+      },
+      "negative_skipping_scorer": {
+        "time_sec": 0.176662,
+        "speedup_vs_anchor": 0.9896,
+        "consistency_fraction": 0.9,
+        "matched": 18000,
+        "mismatched": 0,
+        "all_hard_gates_pass": false,
+        "what": "跳样本的负控：一致性门必须把它判 0"
+      },
+      "ceiling_memoised": {
+        "time_sec": 0.153939,
+        "speedup_vs_anchor": 1.1357,
+        "consistency_fraction": 1.0,
+        "matched": null,
+        "mismatched": null,
+        "all_hard_gates_pass": true,
+        "what": "reviewer-only ceiling：记忆化"
+      },
+      "ceiling_columnar": {
+        "time_sec": 0.092347,
+        "speedup_vs_anchor": 1.8932,
+        "consistency_fraction": 1.0,
+        "matched": null,
+        "mismatched": null,
+        "all_hard_gates_pass": true,
+        "what": "reviewer-only ceiling：列式批处理"
+      },
+      "ceiling_fastmatch": {
+        "time_sec": 0.085588,
+        "speedup_vs_anchor": 2.0427,
+        "consistency_fraction": 1.0,
+        "matched": null,
+        "mismatched": null,
+        "all_hard_gates_pass": true,
+        "what": "reviewer-only ceiling：快路径匹配"
+      }
+    },
+    "val_image_calibrated_on": "<internal registry>/kernelbench/e2e-h3-eval-harness-throughput-quality-val:v0@sha256:2fb40ce2644607ba4841a34bfeda842eef6fabfffbdc0385552df517000a6b1c",
+    "rebuild_note": "2026-07-26 19:40 重烤：把校准后的锚点烤进 /opt/verifier 兜底副本。冻结面三个文件与校准时逐字节相同（只有兜底副本层变了），所以校准阶梯无需重测；镜像内三档自检：起步模板 reward 0.9913、强基线 1.0644、跳样本负控 0.0（一致性 0.9）。"
+  },
+  "threshold_notes": "{'timing_repeats': 'number of timed passes; take the median. Raise if the host shows high variance; confirm noise_floor << baseline_time.', 'min_speedup_plausible': 'anti-noise floor; confirm the naive per-row negative scorer lands well below 1.0 and the strong baseline == ~1.0 by construction.', 'max_score_time_sec': 'single-pass hang cap; set comfortably above the naive baseline pass time.', 'anti_cache_perturb_frac': 'fraction of held-out samples whose outputs are perturbed (with fresh probe:: ids) so a copied id->score lookup mis-scores; a scorer that actually reads inputs still matches.', 'score_consistency': 'confirm the strong baseline and the reference scorer agree EXACTLY on every held-out id (mismatched==0, missing==0) at atol; confirm a sample-skipping / approximate scorer fails the welded consistency gate -> 0.'} | 2026-07-27: strong_baseline_time_sec is now a DIAGNOSTIC only (the speedup denominator is the in-session ABBA baseline); the frozen reward denominator is ref_speedup=2.24419 (see the ref_speedup block; the archived 2.0427 belonged to the superseded cross-host-constant protocol).",
+  "ref_speedup": {
+    "value": 2.24419,
+    "status": "CALIBRATED",
+    "metric": "median measured ABBA speedup of the STRONGEST reviewer reference solution over the strong baseline, under the SHIPPED verifier and the SHIPPED protocol (6 alternating ABBA pairs per run)",
+    "oracle_impl": "solution/ceiling_columnar.py (reviewer-only, NEVER in the image, NEVER run at scoring)",
+    "calibrated_on": "CPU-only session (Intel Sapphire Rapids), 2026-07-27",
+    "n_runs": 5,
+    "n_paired_measurements": 30,
+    "raw_values": [
+      2.25921,
+      2.3311,
+      2.17893,
+      2.24419,
+      2.15482
+    ],
+    "spread_pct_of_median": 7.9,
+    "ladder_measured_same_session": {
+      "ceiling_arrow": {
+        "n": 5,
+        "median": 0.89248,
+        "values": [
+          0.83884,
+          0.90654,
+          0.87434,
+          0.9027,
+          0.89248
+        ],
+        "note": "SLOWER than the strong baseline on this host -> reward 0 via gate 5"
+      },
+      "starter_template": {
+        "n": 1,
+        "median": 0.92472
+      },
+      "strong_baseline_vs_itself": {
+        "n": 1,
+        "median": 0.97867,
+        "note": "the pairing anchor: 2.1% below 1.0 with 6 pairs (was 7% with 5 pairs, hence the even pair count)"
+      },
+      "ceiling_scorer": {
+        "n": 5,
+        "median": 1.05962,
+        "values": [
+          1.02807,
+          1.08952,
+          1.05962,
+          1.06061,
+          1.04483
+        ]
+      },
+      "ceiling_fastmatch": {
+        "n": 5,
+        "median": 2.14211,
+        "values": [
+          2.14963,
+          2.11785,
+          2.10827,
+          2.14211,
+          2.15177
+        ]
+      },
+      "ceiling_columnar": {
+        "n": 5,
+        "median": 2.24419,
+        "values": [
+          2.25921,
+          2.3311,
+          2.17893,
+          2.24419,
+          2.15482
+        ]
+      }
+    },
+    "supersedes": "the pre-2026-07-27 archived ladder (calibrated_record.ladder_measured_same_host) put ceiling_fastmatch at 2.0427 and ceiling_columnar at 1.8932. Those were measured against a CROSS-HOST CONSTANT anchor (0.174827 s) on an earlier CPU-only session; under the new in-session ABBA protocol the ORDER REVERSES (columnar 2.244 > fastmatch 2.142). ref_speedup therefore uses the strongest reference AS MEASURED BY THE SHIPPED PROTOCOL.",
+    "legality_check": "ref_speedup 2.24419 >= 1.15 (reward.md 出题合法性约束) PASS",
+    "expected_rewards_at_this_constant": {
+      "ceiling_columnar (the oracle)": 0.5,
+      "ceiling_fastmatch": 0.4712,
+      "ceiling_scorer": 0.0358,
+      "strong_baseline / starter / ceiling_arrow": 0.0,
+      "cap_1.0_requires_speedup": 5.0364
+    },
+    "hardware_caveat": "此 ref_speedup=2.24419 与 thresholds.strong_baseline_time_sec=0.174827 均在作者的 CPU 通道(Intel Sapphire Rapids, AVX-512-VNNI)上标定。verifier 会以 ABBA 配对现场重测强基线,所以比值相对可移植,但单核吞吐/向量宽度差异很大的机器仍会偏。oracle 实现随题包发布在 task/tests/oracles/,硬件不一致时请用 recalibrate_howto 重标该锚点。",
+    "recalibrate_howto": {
+      "step1": "docker run --rm -v \"$PWD/tests:/tests:ro\" -e VERIFIER_MODE=<tests/oracles 里的模式名> fai/e2e-h3-eval-scoring-throughput:oss bash /tests/test.sh",
+      "step2": "从 /logs/verifier/benchmark_results.json 读 speedup(建议 >=3 次取中位数)",
+      "step3": "写回本文件 ref_speedup.value",
+      "guard": "ref_speedup <= 1 或缺失 => 设计上 HARD FAIL 0",
+      "dataset": "数据集由 task/environment/build_dataset.py 纯 stdlib + seed 20240725 确定性重建;build 时断言重生成的 heldout 与 b387c17... 逐字节一致 => 语料可证同一标定基准"
+    }
+  },
+  "reward_model": "reward_md_log_speedup_v2_oracle_zero",
+  "reward_formula": "reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0; range [0,1]; speedup = median over >=5 alternating ABBA pairs of baseline_time/candidate_time with the baseline RE-MEASURED in-session from oracles/strong_baseline_scoring_pipeline.py",
+  "abba_baseline_impl": "oracles/strong_baseline_scoring_pipeline.py (byte-identical copy of solution/scoring_pipeline_ref.py; uploaded fresh under /tests, NEVER baked)",
+  "abba_ordering_note": "6 pairs (an EVEN count) on purpose: the within-pair order alternates BA/AB, and MEASURED a systematic ordering bias of ~1-8% on a single pair (baseline-vs-itself pair ratios 0.9153/1.0904/0.9894/0.9456/1.0833 in a control session). With an ODD pair count the median always lands on a base-first pair and inherits that bias; with an EVEN count it averages one pair of each order and the bias cancels.",
+  "frozen_surface_files": [
+    "tests/compute_reward.py",
+    "tests/test.sh",
+    "tests/verifier-correctness-manifest.json",
+    "tests/heldout_samples.jsonl",
+    "tests/oracles/strong_baseline_scoring_pipeline.py"
+  ],
+  "trust_boundary_hardening": {
+    "added": "2026-07-28 (vacuity sweep V7)",
+    "why": "the candidate is loaded with importlib INTO the measuring process; the clock, the held-out workload, the harness's own reference scorer, the pass/fail accumulator and the reward function were all reachable module attributes",
+    "measured_bypasses_before_fix": {
+      "clock_debt_K5.5": {
+        "reward": 0.9477371018832937,
+        "speedup": 4.628331518575806
+      },
+      "clock_debt_K2.6": {
+        "reward": 0.5402572463687533,
+        "speedup": 2.3951074977809506
+      },
+      "compute_log_reward_patch_slow_candidate": {
+        "reward": 1.0,
+        "speedup": 0.9289690570006028
+      },
+      "compute_log_reward_patch_skipping_wrong_candidate": {
+        "reward": 1.0,
+        "speedup": null
+      },
+      "reference_score_one_patch_null_scorer": {
+        "reward": 1.0,
+        "speedup": 15.00020376850541
+      }
+    },
+    "honest_controls_same_session": {
+      "baseline_self": {
+        "reward": 0.0,
+        "speedup": 0.952225060077247
+      },
+      "starter": {
+        "reward": 0.0,
+        "speedup": 0.926038241617116
+      },
+      "skipping_wrong": {
+        "reward": 0.0,
+        "reason": "correctness_failed"
+      }
+    },
+    "fix": "primitives bound before candidate import + _assert_pristine at 13 sites + frozen cfg reward keys; named reason cheating_harness_tamper",
+    "compute_reward_sha256_before_fix": "e5b27207730a7a1179e073d32b3e2882fa07f9be1e79916e5ea5eabe8067757c"
+  }
+}

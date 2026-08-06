@@ -1,0 +1,153 @@
+diff --git a/sp24mm/matmul.py b/sp24mm/matmul.py
+index a5f7f45..9226196 100644
+--- a/sp24mm/matmul.py
++++ b/sp24mm/matmul.py
+@@ -25,31 +25,90 @@ in-group position ``r = k % 4``:
+ and the result is ``a @ W`` reduced with an fp32 accumulator and returned as
+ ``torch.float16`` ``[M, N]``. K is a multiple of 4. The benchmark drives a small-M,
+ large-K/N (weight-heavy) shape; the compressed weight is half the size of the dense
+-weight and only the 2 active activation columns per group contribute. The PUBLIC
+-SIGNATURE and NUMERICAL CONTRACT are fixed and MUST be preserved; only the
+-implementation in this file is in scope.
+-
+-SLOW-BUT-CORRECT baseline: the compressed weight is first DECOMPRESSED into a full dense
+-``[K, N]`` fp16 buffer in global memory (scatter each of the 2 nonzeros per group to its
+-row via the metadata indices, zero elsewhere), and a dense matmul is then run on that
+-materialised buffer. The dense weight is written to and read back from device memory (an
+-extra full ``[K, N]`` pass), it is twice the bytes of the compressed representation, and
+-the matmul does the full dense K work including the structural zeros. The block is
+-memory/compute-bound; bring it up to production speed without changing the contract.
++weight. The PUBLIC SIGNATURE and NUMERICAL CONTRACT are fixed and MUST be preserved;
++only the implementation in this file is in scope.
++
++PARTIAL implementation (correct, fused, but under-tuned tiles): a single fused kernel streams the COMPRESSED weight tiles
++(``w_vals`` ``[K//2, N]`` + ``w_meta`` ``[K//4, N]``) from global memory and, per K-step
++covering a block of groups, reconstructs the corresponding dense ``[4*BLOCK_G, BLOCK_N]``
++weight tile ENTIRELY IN REGISTERS (a broadcasted 4-way select scatters each group's 2
++nonzeros to their metadata row), then accumulates ``a_tile @ w_tile`` with a matrix engine
++-- the dense ``[K, N]`` weight is NEVER written to or read from global memory, only the
++half-size compressed representation is streamed. A grouped program ordering improves L2
++locality.
+ """
+ import torch
++import triton
++import triton.language as tl
++
++
++@triton.jit
++def _sp24mm_matmul_kernel(a_ptr, wv_ptr, wm_ptr, c_ptr,
++                          M, N, K,
++                          stride_am, stride_ak, stride_wvk, stride_wvn,
++                          stride_wmg, stride_wmn, stride_cm, stride_cn,
++                          BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
++                          BLOCK_G: tl.constexpr, GROUP_M: tl.constexpr):
++    # BLOCK_G = number of 4-row K-groups per K-step; BLOCK_K = 4*BLOCK_G logical K rows.
++    pid = tl.program_id(0)
++    num_pid_m = tl.cdiv(M, BLOCK_M)
++    num_pid_n = tl.cdiv(N, BLOCK_N)
++    num_pid_in_group = GROUP_M * num_pid_n
++    group_id = pid // num_pid_in_group
++    first_pid_m = group_id * GROUP_M
++    group_size_m = min(num_pid_m - first_pid_m, GROUP_M)
++    pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)
++    pid_n = (pid % num_pid_in_group) // group_size_m
++
++    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
++    offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
++    offs_g = tl.arange(0, BLOCK_G)                      # group offsets within a K-step
++    offs_r = tl.arange(0, 4)                            # in-group row [0,4)
++    offs_bk = tl.arange(0, BLOCK_G * 4)                 # logical-K offsets within a K-step
++    n_mask = offs_n < N
++    Kg = K // 4
++
++    a_base = a_ptr + offs_m[:, None] * stride_am
++    wv_base = wv_ptr + offs_n[None, :] * stride_wvn
++    wm_ptrs = wm_ptr + offs_g[:, None] * stride_wmg + offs_n[None, :] * stride_wmn
++
++    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
++    num_ksteps = tl.cdiv(Kg, BLOCK_G)
++    for k0 in range(0, num_ksteps):
++        g_base = k0 * BLOCK_G
++        g_off = g_base + offs_g                          # [BLOCK_G]
++        gmask = (g_off[:, None] < Kg) & (offs_n[None, :] < N)
++        meta = tl.load(wm_ptrs, mask=gmask, other=0).to(tl.int32)     # [BLOCK_G, BLOCK_N]
++        i0 = (meta & 0x3)
++        i1 = ((meta >> 2) & 0x3)
++        v0 = tl.load(wv_base + (2 * g_off)[:, None] * stride_wvk,
++                     mask=gmask, other=0.0).to(tl.float32)            # [BLOCK_G, BLOCK_N]
++        v1 = tl.load(wv_base + (2 * g_off + 1)[:, None] * stride_wvk,
++                     mask=gmask, other=0.0).to(tl.float32)
++        # reconstruct the dense per-group weight in registers: w_stack[g, r, n] =
++        # (i0==r ? v0 : 0) + (i1==r ? v1 : 0), broadcasting the in-group row axis r.
++        i0e = i0[:, None, :]                             # [BLOCK_G, 1, BLOCK_N]
++        i1e = i1[:, None, :]
++        v0e = v0[:, None, :]
++        v1e = v1[:, None, :]
++        r_ax = offs_r[None, :, None]                     # [1, 4, 1]
++        w_stack = (tl.where(i0e == r_ax, v0e, 0.0)
++                   + tl.where(i1e == r_ax, v1e, 0.0))     # [BLOCK_G, 4, BLOCK_N]
++        w_tile = tl.reshape(w_stack, (BLOCK_G * 4, BLOCK_N)).to(tl.float16)  # row bk = 4*g + r
++        # activation tile for this K-step: logical K = 4*g_base + offs_bk
++        k_cols = 4 * g_base + offs_bk
++        a_tile = tl.load(a_base + k_cols[None, :] * stride_ak,
++                         mask=(offs_m[:, None] < M) & (k_cols[None, :] < K), other=0.0)  # [BLOCK_M, BLOCK_G*4]
++        acc += tl.dot(a_tile, w_tile)
++        wm_ptrs += BLOCK_G * stride_wmg
++
++    c_ptrs = c_ptr + offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn
++    tl.store(c_ptrs, acc.to(tl.float16), mask=(offs_m[:, None] < M) & (offs_n[None, :] < N))
+ 
+ 
+ def sp24mm_matmul(a: torch.Tensor, w_vals: torch.Tensor,
+                   w_meta: torch.Tensor) -> torch.Tensor:
+-    """Return ``a @ W`` as fp16 ``[M, N]`` for a 2:4 semi-structured sparse ``W``.
+-
+-    Contract (all tensors CUDA):
+-      a      : fp16  [M, K]                 (K a multiple of 4)
+-      w_vals : fp16  [K // 2, N]            (2 nonzeros per 4-row K-group, K-order)
+-      w_meta : uint8 [K // 4, N]            (two 2-bit in-group nonzero indices per group:
+-                                             low 2 bits = 1st, next 2 bits = 2nd)
+-    """
++    """Return ``a @ W`` as fp16 ``[M, N]`` for a 2:4 semi-structured sparse ``W``."""
+     M, K = a.shape
+     Kh, N = w_vals.shape
+     Kg = w_meta.shape[0]
+@@ -57,23 +116,18 @@ def sp24mm_matmul(a: torch.Tensor, w_vals: torch.Tensor,
+     assert Kh == K // 2, "w_vals must have K//2 rows"
+     assert Kg == K // 4 and w_meta.shape[1] == N, "w_meta shape mismatch"
+ 
+-    # SLOW-BUT-CORRECT: decompress the 2:4 weight into a full dense [K, N] fp16 buffer in
+-    # global memory (scatter the 2 nonzeros of each group to their metadata rows, zeros
+-    # elsewhere), then run a dense fp32 matmul on it. An extra full [K, N] write/read for
+-    # the densified weight (twice the bytes of the compressed form), and the matmul does
+-    # the full dense K work including the structural zeros.
+-    Kg = K // 4
+-    meta = w_meta.to(torch.int64)                                # [Kg, N]
+-    i0 = (meta & 0x3)                                            # [Kg, N] 1st nonzero row
+-    i1 = ((meta >> 2) & 0x3)                                     # [Kg, N] 2nd nonzero row
+-    v0 = w_vals[0::2, :].to(torch.float32)                       # [Kg, N] 1st nonzero value
+-    v1 = w_vals[1::2, :].to(torch.float32)                       # [Kg, N] 2nd nonzero value
+-
+-    w = torch.zeros((Kg, 4, N), dtype=torch.float32, device=a.device)  # [Kg, 4, N] dense group
+-    nidx = torch.arange(N, device=a.device)[None, :].expand(Kg, N)     # [Kg, N]
+-    gidx = torch.arange(Kg, device=a.device)[:, None].expand(Kg, N)    # [Kg, N]
+-    w[gidx, i0, nidx] = v0
+-    w[gidx, i1, nidx] = v1
+-    w = w.reshape(K, N)                                          # [K, N] dense fp32 weight
+-    c = torch.matmul(a.to(torch.float32), w)                     # [M, N] fp32
+-    return c.to(torch.float16)
++    BLOCK_M, BLOCK_N, GROUP_M = 64, 32, 1
++    BLOCK_G = 16                                         # -> BLOCK_K = 64 logical K per step
++
++    w_vals = w_vals.contiguous()
++    w_meta = w_meta.contiguous()
++    c = torch.empty((M, N), device=a.device, dtype=torch.float16)
++    grid = (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N),)
++    _sp24mm_matmul_kernel[grid](
++        a, w_vals, w_meta, c,
++        M, N, K,
++        a.stride(0), a.stride(1), w_vals.stride(0), w_vals.stride(1),
++        w_meta.stride(0), w_meta.stride(1), c.stride(0), c.stride(1),
++        BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N, BLOCK_G=BLOCK_G, GROUP_M=GROUP_M,
++        num_warps=2, num_stages=2)
++    return c

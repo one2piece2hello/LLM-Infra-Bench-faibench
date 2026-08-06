@@ -1,0 +1,110 @@
+{
+  "schema": "e2e_verifier_correctness_manifest_v2",
+  "task_id": "e2e-a4-token-efficiency-budget",
+  "family": "A_training",
+  "reward_model": {
+    "spec": "the bench reward spec — performance class, BOUNDED log form",
+    "name": "reward_md_log_speedup_v2_oracle_zero",
+    "formula": "reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0; range [0,1]",
+    "speedup_definition": "baseline_bpb / median_val_bpb  (held-out bits-per-byte at a FIXED TRAINING-TOKEN budget, median over the harness seed set; lower bpb is better, so the ratio is >1 only when the candidate beats the tuned-AdamW recipe it started from)",
+    "metric_kind": "quality_at_fixed_budget",
+    "metric_name": "val_bpb",
+    "metric_direction": "lower_is_better",
+    "timing_measured": false,
+    "semantic_caveat": "`speedup` / `ref_speedup` carry a QUALITY ratio, not a wall-clock ratio. Nothing in this task is timed for score — the wall-clock is only a feasibility guard and the BUDGET is tokens. reward.md's bounded log envelope is ratio-agnostic; only the variable name says latency. The field names are kept for schema compatibility and are described by metric_kind / metric_name / metric_direction / timing_measured.",
+    "baseline_bpb": 1.7021411251584952,
+    "baseline_bpb_status": "CALIBRATED ON H20 2026-07-27: median of 5 runs of the SHIPPED starter through the shipped harness (values [1.7036998866199995, 1.7021411251584952, 1.7051986273928117, 1.7010994296767377, 1.7020227068179146]), spread 0.004099 bpb (0.241%), cv 0.00095. FROZEN constant; the scorer never runs the baseline.",
+    "baseline_cv": 0.0009509307814044752,
+    "baseline_runs": 5,
+    "ref_speedup": 1.204527530540146,
+    "ref_speedup_status": "CALIBRATED ON H20 2026-07-27: baseline median / oracle median = 1.204528 from 5 baseline and 5 oracle runs, INTERLEAVED A/B in one session. Oracle values [1.409003292011136, 1.4127749101779128, 1.4307412643520512, 1.4236769838932675, 1.4131193202327261], spread 0.021738 bpb (1.538%), cv 0.00637. Clears reward.md's 1.15 authoring floor; worst-case pairing under the observed spread is 1.188964. FROZEN constant; the oracle is NOT in the image and is NEVER run at scoring time.",
+    "ref_speedup_authoring_floor": 1.15,
+    "oracle_runs": 5,
+    "oracle_bpb_median": 1.4131193202327261,
+    "oracle_in_image": false,
+    "fail_closed": "when baseline_bpb or ref_speedup is absent / <= 1 / below the authoring floor the run is a HARD FAIL with reason `ref_speedup_invalid_or_missing`; it is NEVER silently treated as 1.0.",
+    "baseline_spread_abs": 0.004099197716074032,
+    "oracle_cv": 0.00637238990388236,
+    "oracle_spread_abs": 0.021737972340915235,
+    "ref_speedup_worst_case_pairing": 1.1889637015866215,
+    "hardware_and_data_caveat": "baseline_bpb=1.7021411251584952 与 ref_speedup=1.204527530540146 均在 H20 上、且在 task/environment/Dockerfile 里那份 WikiText-103-raw + SentencePiece-BPE-8192 语料上标定。 若你的 GPU 不是 H20,或重建语料的指纹(build 日志里打印的 tokenizer.model / train.bin sha256)与已知良好构建不一致,这两个常量就不再可比 —— 请按 recalibrate_howto 重新标定后再计分。 参考实现:强基线 task/solution/strong_baseline/,oracle task/solution/ceiling/(reviewer-only,不进镜像)。",
+    "recalibrate_howto": {
+      "why": "reward = min(1, ln((baseline_bpb/val_bpb)/ref_speedup)/ln(ref_speedup)), 且 (baseline_bpb/val_bpb) <= ref_speedup 时为 0;两个常量是标定值,判分时只读、不重跑参考实现。",
+      "note": "计分路径故意不接受 VERIFIER_MODE(反作弊),因此重标定的做法是把参考实现挂成 candidate 来跑。",
+      "step1_baseline": "docker run --rm --gpus all --shm-size=8g -v \"$PWD/solution/strong_baseline:/app/submission:ro\" -v \"$PWD/tests:/tests:ro\" fai/e2e-a4-token-efficiency-budget:oss bash /tests/test.sh",
+      "step2_oracle": "docker run --rm --gpus all --shm-size=8g -v \"$PWD/solution/ceiling:/app/submission:ro\" -v \"$PWD/tests:/tests:ro\" fai/e2e-a4-token-efficiency-budget:oss bash /tests/test.sh",
+      "step3_read": "从 /logs/verifier/benchmark_results.json 取 val_bpb(建议各跑 >=3 次取中位数)",
+      "step4_write": "写回本文件 reward_model.baseline_bpb = 强基线中位数;reward_model.ref_speedup = baseline_bpb / oracle 中位数",
+      "guard": "ref_speedup <= 1 或缺失 => 设计上 HARD FAIL 0;authoring floor 为 1.15"
+    }
+  },
+  "lever": "SAMPLE EFFICIENCY at a FIXED TRAINING-TOKEN budget (A4 优化器算法 + architecture + data schedule). The budget is TOKENS, not wall-clock, which STRUCTURALLY zeroes every throughput lever the sibling family-A tasks grade (fp8, torch.compile, batch tuning, a faster loader buy nothing when the budget is tokens). The only way to a lower held-out val_bpb is to extract more learning per token: the optimizer/update rule (Muon-style spectral updates), the architecture (RMSNorm/RoPE/QK-norm/ReLU^2/zero-init/logit-softcap), and the data schedule.",
+  "budget": {
+    "token_budget": 24000000,
+    "kind": "TRAINING TOKENS (the budget). Enforced BY CONSTRUCTION, not by a counter: the harness slices exactly token_budget tokens from the digest-pinned corpus into a per-seed shard, points DATA_PATH at it, and chmod-000 quarantines the full corpus for the duration of the scored run, so no recipe can consume more tokens than the budget. Nothing is trusted from the candidate; no in-loop token counter is believed. Restored after every seed.",
+    "wallclock_guard_seconds": 900.0,
+    "wallclock_note": "A FEASIBILITY GUARD, NOT the budget — deliberately generous so a slower-but-smarter recipe is never penalised. MEASURED: the tuned-AdamW anchor needs ~76 s and the record-style ceiling ~114 s per seed at the 24M budget; the 900 s guard is ~8x/12x those. Enforced by an EXTERNAL hard kill (setsid process group -> SIGTERM -> SIGKILL at guard+grace), never a cooperative in-loop timer.",
+    "budget_grace_seconds": 60.0
+  },
+  "n_seeds": 3,
+  "seeds": [
+    1337,
+    2027,
+    90101
+  ],
+  "seed_policy": "The harness FIXES the seed set (not solver-selectable) and scores the MEDIAN val_bpb over seeds -> kills the seed lottery.",
+  "quality_gate": {
+    "max_param_count": 45000000,
+    "min_param_count_floor": 20000000,
+    "min_param_count": 1000000,
+    "param_cap_why": "At a fixed TOKEN budget a bigger model is monotonically better, so without a cap the task would reward buying HBM instead of sample efficiency. The harness RE-COUNTS parameters from the reloaded artifact, never a self-report. The floor blocks a degenerate tiny model. The reference recipes sit at ~29.6M, leaving real architectural room inside the cap.",
+    "min_plausible_val_bpb": 1.0,
+    "min_plausible_val_bpb_note": "ANTI-SPOOF / ANTI-CONTAMINATION floor, tightened from 0.30. No honest recipe trained from scratch on 24M tokens at this parameter scale reaches 1.00 bpb on the held-out split (the demonstrated in-budget ceiling is ~1.41), so a value below the floor means a forged loss or held-out contamination, not a better model. Firing this check is reported as `anti_cheat_triggered`.",
+    "quality_floor_val_bpb": 3.0,
+    "ood_loss_ratio": 0.7,
+    "logits_position_variance_floor": 0.0001,
+    "logits_loss_agreement_tol": 0.05,
+    "note": "parameter-golf anti-spoof kit, verbatim: a real LM scores real held-out text << arbitrary ids; forward(x,y) loss == CE(forward(x),y); logits vary across positions; >=1M params; val_bpb inside a plausibility band. Every check is HARD under the bounded reward (the quality floor used to be soft-tagged). A TRUNCATED suite (fewer checks than expected_total_checks = 1 + 7*n_seeds + 2 (= 24 at 3 seeds, exactly the pre-modification suite size)) can never score above 0 (`gate_suite_incomplete`)."
+  },
+  "smuggled_checkpoint_block": {
+    "staging_strip": "the training entry runs from an ISOLATED staging dir holding source files only: every *.pt/*.pth/*.bin/*.safetensors/*.ckpt/*.npz/*.npy/*.pkl/*.h5/*.onnx/*.gguf and every file >8 MB is withheld, so there is no pre-baked artifact to hand back.",
+    "cross_seed_divergence": "the harness trains >=3 seeds and requires >=3 DISTINCT checkpoint sha256 digests; byte-identical weights across seeds => reward 0 (real training on different seeds cannot produce identical weights). This catches a smuggled/cached checkpoint even if it evaded the strip.",
+    "negative_control": "solution/negative/train_gpt.py is REVIEWER-ONLY (and no longer baked into the image) and exercises exactly this cheat; it MUST score 0."
+  },
+  "anti_tamper": {
+    "frozen_surface_fingerprint": "the scorer sha256s EVERY file in /tests before each training call and re-checks after it returns. Any content change => `anti_cheat_triggered` + `forbidden_edit_path`; any mode change or unexpected new file in /tests => `anti_cheat_triggered`.",
+    "quarantine": "/tests is chmod 0000 for the duration of every training call, so the held-out corpus and the calibrated constants are unreadable while the candidate's code runs.",
+    "env_override_removed": "the scorer used to honour E2E_BUDGET_SECONDS_OVERRIDE / E2E_TOKEN_BUDGET_OVERRIDE / E2E_N_SEEDS_OVERRIDE and E2E_STRONG_BASELINE_BPB_OVERRIDE — i.e. the reward's own anchor was settable from the environment, and the container entrypoint is a LOGIN shell that sources the solver-owned ~/.bashrc. All four are GONE; test.sh additionally unsets every E2E_* variable before scoring.",
+    "mode_dispatch_removed": "test.sh used to copy a reviewer recipe into /app/submission when VERIFIER_MODE was set, reading it from the baked /opt/strong_baseline — an environment-settable backdoor into the graded tree. The scored path now grades /app/submission and nothing else, and a non-candidate VERIFIER_MODE is itself a hard fail.",
+    "residual": "the training entry runs as uid 0 in the same container, so a determined root solver can chmod /tests back and read the held-out corpus. That is DETECTED (mode change) but not PREVENTED. Full prevention requires running the training entry under an unprivileged uid.",
+    "training_uid": 65534,
+    "training_uid_note": "The candidate's train_for_budget runs as uid 65534 (nobody), NOT root. This is what makes BOTH quarantines real: chmod 0000 is ignored by uid 0, so without the drop a root recipe could open the FULL corpus at /data/datasets/wikitext_bpe8k/train.bin and train on far more than token_budget tokens (defeating 'enforced by construction'), and could read the held-out corpus it is scored on. The harness grants the unprivileged uid write access to its staging dir + out_dir and read access to the budgeted shard, and nothing else; the child reports the euid it ACTUALLY ran under (training_privileges in metrics.json) so the record is the truth rather than the intent. Set to null to disable."
+  },
+  "held_out": {
+    "corpus": "/tests/holdout_corpus.txt",
+    "identity": "canonical WikiText-103 TEST split (1,281,873 bytes) — the SAME validated holdout the sibling training tasks use. Uploaded FRESH at scoring and NO LONGER BAKED into the image (it was baked at /opt/verifier/holdout_corpus.txt in :v2, readable at uid 0).",
+    "eval": "stabilized median-of-3-shifted-passes, fp32 cross-entropy, bits-per-byte via SentencePiece byte-LUTs (parameter-golf eval machinery, lifted verbatim)"
+  },
+  "data_loader_checksum": {
+    "train_shard": "/data/datasets/wikitext_bpe8k/train.bin",
+    "sha256": "a992ab77a07032e28037cae808b3dc4a08da531682d75126191c06cedcef001c",
+    "tokenizer": "/data/tokenizers/wikitext_bpe8k.model (BPE-8K SentencePiece, vocab 8192)",
+    "note": "the corpus digest is pinned and the scored shard is cut from it; the loader IMPLEMENTATION is open (order/packing/curriculum are levers) but its byte content is pinned."
+  },
+  "entry_contract": {
+    "training": "/app/submission/train_gpt.py :: train_for_budget(seed, out_dir, budget_seconds) -> must write <out_dir>/model_ckpt.pt. Harness env: SEED, TOKEN_BUDGET, MAX_WALLCLOCK_SEC, MAX_PARAMS, OUT_CKPT, DATA_PATH (= the budgeted shard), TOKENIZER_PATH, NANOGPT_REPO.",
+    "reload": "/app/submission/train_gpt.py :: load_model_for_verification(checkpoint_path, device) -> nn.Module or (args, model) honoring model(x)->logits (B,T,V) and model(x,y)->scalar CE loss."
+  },
+  "frozen_surface": [
+    "/tests/compute_reward.py",
+    "/tests/test.sh",
+    "/tests/holdout_corpus.txt",
+    "/tests/verifier-correctness-manifest.json"
+  ],
+  "compute_reward_sha256": "acef9764228d17457e9c3e874eec62f3490a00012aae5322d3bc2893ecd61768",
+  "editable_area": "the whole /app/repo (nanoGPT -- the model, attention, and training code are all fair game) + /app/submission, minus the frozen surface.",
+  "provenance": {
+    "harness_lifted_from": "the sub-quadratic-LM sibling task's compute_reward.py (itself from the parameter-golf task family): the eval, anti-spoof kit, isolated-staging strip, external hard kill and cross-seed divergence gate are reused verbatim; the A6 sub-quadratic-scaling gate is REPLACED by this task's parameter cap, and the wall-clock budget is REPLACED by the token budget.",
+    "public_references_allowed": "KellerJordan/modded-nanogpt (the record trajectory + its git history), kellerjordan.github.io/posts/muon, karpathy/nanoGPT. The METHOD is public and allowed; what is protected is the MEASUREMENT."
+  }
+}

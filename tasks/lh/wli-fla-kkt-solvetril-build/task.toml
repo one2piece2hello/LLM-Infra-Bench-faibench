@@ -1,0 +1,47 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wli-fla-kkt-solvetril-build"
+bench = "lh"
+kind = "implementation"
+language = "python"
+title = "Task: implement the chunk-local WY / UT transform (two coupled files)"
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wli-fla-kkt-solvetril-build:v3y@sha256:9eab3170a359b786ab0d3ce3a9ce8a91820eb132cb0746c95d9003521e1c8b55
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/lh-fla-kkt-solvetril-build:oss .`
+# provenance (original internal image, not publicly pullable): <internal registry>/kernelbench/wli-fla-kkt-solvetril-build:v3y@sha256:9eab3170a359b786ab0d3ce3a9ce8a91820eb132cb0746c95d9003521e1c8b55
+[environment]
+docker_image = "fai/lh-fla-kkt-solvetril-build:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 6
+memory_mb = 32768
+gpus = 1
+# H20 只是本题原始运行用卡,不是硬性限制。本题是 correctness 类、无硬件标定锚点,
+# 所以换卡不需要重标;仅需 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像。
+gpu_types = ["H20"]
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "correctness"
+contract_pattern = "kernelbench_generic_v1"
+task_family = "build"
+start_shape = "hollow"
+primary_edit_paths = ["fla/ops/common/chunk_scaled_dot_kkt.py", "fla/ops/utils/solve_tril.py"]
+forbidden_edit_paths = ["*"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "graded_suite_fraction"
+goal = "maximize"
+reward_kind = "graded_suite"
+calibrated_on = "NVIDIA H20"

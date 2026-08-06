@@ -1,0 +1,165 @@
+diff --git a/grad_compress.py b/grad_compress.py
+index 00bb045..4cb19f7 100644
+--- a/grad_compress.py
++++ b/grad_compress.py
+@@ -1,61 +1,19 @@
+-"""Gradient compression with a carry-over residual for low-bandwidth data-parallel
+-training.
+-
+-Public entry points:
+-    ``compress(buf, residual) -> (payload, new_residual)``
+-    ``decompress(payload) -> torch.Tensor``
+-
+-During distributed training each worker must move its gradient buffer to the
+-other workers every step. Moving the full-precision buffer is bandwidth-hungry;
+-the goal of this module is to move a *compact* representation of the buffer and a
+-persistent ``residual`` accumulator so that, although each individual transmission
+-is lossy, the running average of what is transmitted stays unbiased over many
+-steps.
+-
+-Contract
+---------
+-- ``buf``: a gradient tensor of any shape (flattened internally), dtype
+-  ``torch.float32``, CUDA tensor.
+-- ``residual``: a persistent accumulator, dtype ``torch.float32``, with the
+-  **same number of elements** as ``buf`` (same shape). It carries the part of the
+-  buffer that the previous compression could not represent.
+-- ``compress`` returns ``(payload, new_residual)``:
+-    * ``payload``: a picklable representation of the compensated buffer, from
+-      which ``decompress`` reconstructs a full-shape tensor. The number of bytes
+-      the payload occupies is the value that is scored.
+-    * ``new_residual``: the updated accumulator, an fp32 tensor with the same
+-      shape as ``buf``.
+-- ``decompress(payload)`` reconstructs a full-shape (``buf.shape``) fp32 tensor.
+-
+-Required semantics (for each call), writing ``comp = buf + residual``:
+-
+-    let ``q = decompress(compress(buf, residual).payload)``
+-    then ``new_residual == comp - q``          # carry over what q could not represent
+-
+-This accumulator identity must hold exactly (up to fp32 rounding). It makes the
+-transmitted sequence unbiased: over ``K`` steps against a fixed target ``t`` the
+-running mean of the decompressed outputs converges to ``t`` and the telescoping
+-sum ``sum_k q_k + residual_K == K * t`` is conserved.
+-
+-Error contract
+---------------
+-- ``TypeError`` if ``buf`` or ``residual`` is not a ``torch.float32`` tensor.
+-- ``ValueError`` if ``residual`` does not have the same number of elements as
+-  ``buf``.
+-
+-Note on allowed operations
+---------------------------
+-The framework's built-in quantization primitives are out of scope — any scale,
+-sign mapping, bit-level packing and the accumulator update are built explicitly
+-from primitive tensor ops. The current implementation below transmits the entire
+-buffer at full precision (no compaction at all): it is correct and unbiased, but
+-it moves the maximum possible number of bytes every step and leaves all of the
+-low-bandwidth headroom on the table.
++"""REVIEWER-ONLY baseline2 (second positive reference) for
++errorfeedback-sign-compress — NOT baked, never model-visible.
++
++A structurally DIFFERENT compressor from the oracle: per-block int8 quantization
++(8 bits/element with an absmax scale) plus the same feedback accumulator. It is a
++valid, unbiased error-feedback compressor, so it passes the whole correctness
++suite — proving the verifier is not oracle-code-matching — but it moves ~8x more
++bytes than the 1-bit oracle (int8 payload ~= numel bytes vs numel/8), so it earns a
++smaller-but-positive byte ratio (~4x over the full-fp32 baseline). Oracle-mode scoring confirms
++baseline2 > 1.0 and oracle > baseline2 in a scoring run.
+ """
+ 
+ import torch
+ 
+ FP32 = torch.float32
++BLOCK_SIZE = 2048
+ 
+ 
+ def _validate(buf, residual):
+@@ -70,25 +28,74 @@ def _validate(buf, residual):
+             f"residual numel {residual.numel()} must equal buf numel {buf.numel()}")
+ 
+ 
+-def compress(buf, residual):
+-    """Naive full-precision transmission (candidate start state).
++def _pad_view(flat, n):
++    nfull = n // BLOCK_SIZE
++    rem = n - nfull * BLOCK_SIZE
++    return nfull, rem
+ 
+-    Adds the carried-over residual, then stores the whole compensated buffer at
+-    fp32. Because nothing is discarded the leftover residual is exactly zero and
+-    reconstruction is lossless — correct and unbiased, but the payload is the full
+-    ``4 * numel`` bytes (no bandwidth saving).
+-    """
++
++def compress(buf, residual):
+     _validate(buf, residual)
+-    comp = buf.to(FP32) + residual.reshape(buf.shape).to(FP32)
++    comp = (buf.to(FP32) + residual.reshape(buf.shape).to(FP32)).reshape(-1)
++    n = comp.numel()
++    nfull, rem = _pad_view(comp, n)
++    nblocks = nfull + (1 if rem else 0)
++    scale = torch.empty(nblocks, dtype=FP32, device=comp.device)
++    qint = torch.empty(n, dtype=torch.int8, device=comp.device)
++
++    def _quant_block(blk):
++        absmax = blk.abs().max()
++        s = absmax / 127.0
++        s = torch.where(s == 0, torch.ones_like(s), s)   # guard all-zero block
++        qi = torch.clamp(torch.round(blk / s), -127, 127).to(torch.int8)
++        return s, qi
++
++    if nfull:
++        full = comp[: nfull * BLOCK_SIZE].view(nfull, BLOCK_SIZE)
++        absmax = full.abs().max(dim=1).values
++        s = absmax / 127.0
++        s = torch.where(s == 0, torch.ones_like(s), s)
++        scale[:nfull] = s
++        qint[: nfull * BLOCK_SIZE] = torch.clamp(
++            torch.round(full / s.unsqueeze(1)), -127, 127).to(torch.int8).reshape(-1)
++    if rem:
++        s_t, qi_t = _quant_block(comp[nfull * BLOCK_SIZE:])
++        scale[nfull] = s_t
++        qint[nfull * BLOCK_SIZE:] = qi_t
++
++    # reconstruction for the feedback update
++    q = torch.empty(n, dtype=FP32, device=comp.device)
++    if nfull:
++        q[: nfull * BLOCK_SIZE] = (
++            qint[: nfull * BLOCK_SIZE].view(nfull, BLOCK_SIZE).to(FP32) * scale[:nfull].unsqueeze(1)
++        ).reshape(-1)
++    if rem:
++        q[nfull * BLOCK_SIZE:] = qint[nfull * BLOCK_SIZE:].to(FP32) * scale[nfull]
++    new_residual = (comp - q).reshape(buf.shape)
++
+     payload = {
+-        "dense": comp.reshape(-1).clone(),   # full fp32 buffer on the wire
+-        "numel": int(comp.numel()),
++        "scale": scale,               # (nblocks,) fp32
++        "qint": qint,                 # numel int8  <- 8 bits/element (coarser than 1-bit)
++        "numel": int(n),
+         "shape": tuple(buf.shape),
++        "block_size": int(BLOCK_SIZE),
+     }
+-    new_residual = torch.zeros_like(buf, dtype=FP32)   # lossless -> no leftover
+     return payload, new_residual
+ 
+ 
+ def decompress(payload):
+-    """Reconstruct the full-shape fp32 tensor from a payload."""
+-    return payload["dense"].reshape(payload["shape"]).to(FP32)
++    scale = payload["scale"]
++    qint = payload["qint"]
++    n = int(payload["numel"])
++    shape = payload["shape"]
++    bs = int(payload["block_size"])
++    nfull = n // bs
++    rem = n - nfull * bs
++    out = torch.empty(n, dtype=FP32, device=scale.device)
++    if nfull:
++        out[: nfull * bs] = (
++            qint[: nfull * bs].view(nfull, bs).to(FP32) * scale[:nfull].unsqueeze(1)
++        ).reshape(-1)
++    if rem:
++        out[nfull * bs:] = qint[nfull * bs:].to(FP32) * scale[nfull]
++    return out.reshape(shape)

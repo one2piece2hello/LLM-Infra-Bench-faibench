@@ -1,0 +1,85 @@
+diff --git a/varlen_cu_seqlens.py b/varlen_cu_seqlens.py
+index ae20528..65ed2f3 100644
+--- a/varlen_cu_seqlens.py
++++ b/varlen_cu_seqlens.py
+@@ -22,58 +22,33 @@ The public entry point is::
+ as ``positions[b][col]``) of non-negative ints, with ``positions[b][0] == 0`` (every
+ packed row begins a document).
+ 
+-The current implementation is functionally correct but slow: it scans every token in
+-Python to find the per-row document starts, assembles the index lists element by
+-element, and finds ``max_seqlen`` with a Python max loop. Its cost is O(batch *
+-seq_len) in the interpreter.
++Vectorized implementation: the document starts are the flat indices where the
++row-major-flattened positions equal 0 (``np.flatnonzero``), already in the required
++order; ``cu_seqlens`` closes with the total token count, and the per-document lengths
++(hence ``max_seqlen``) are a single ``np.diff`` reduction.
+ """
+ 
+-
+-def _as_2d_int(positions):
+-    """Normalize ``positions`` to a list-of-lists of Python ints (rows)."""
+-    rows = []
+-    for b in range(len(positions)):
+-        row = positions[b]
+-        rows.append([int(v) for v in row])
+-    return rows
++import numpy as np
+ 
+ 
+ def build_varlen_cu_seqlens(positions):
+     """Build packed varlen ``(cu_seqlens, max_seqlen)`` from reset-at-boundary positions.
+ 
+-    Slow-but-correct reference: per-row Python boundary scan + element-wise list
+-    assembly + Python max.
++    Fast path: one row-major boundary detection + a single diff/max reduction.
+     """
+-    pos = _as_2d_int(positions)
+-    batch_size = len(pos)
+-    seq_len = len(pos[0]) if batch_size else 0
+-
+-    cu_seqlens = []
+-    all_seq_lengths = []
+-    offset = 0
+-    for b in range(batch_size):
+-        row = pos[b]
+-        # Per-token scan for document starts (positions reset to 0).
+-        doc_starts = []
+-        for i in range(seq_len):
+-            if row[i] == 0:
+-                doc_starts.append(i)
+-        # sample_cu_seqlens = doc_starts followed by the row length; the pairwise
+-        # differences are this row's per-document lengths.
+-        sample = doc_starts + [seq_len]
+-        for k in range(len(sample) - 1):
+-            all_seq_lengths.append(sample[k + 1] - sample[k])
+-        # Global (batch-flattened) document-start indices for this row.
+-        for d in doc_starts:
+-            cu_seqlens.append(d + offset)
+-        offset += seq_len
+-
+-    # Final total token count closes the packed cu_seqlens.
+-    cu_seqlens.append(offset)
+-
+-    max_seqlen = 0
+-    for length in all_seq_lengths:
+-        if length > max_seqlen:
+-            max_seqlen = length
+-
+-    return cu_seqlens, int(max_seqlen)
++    pos = np.asarray(positions)
++    if pos.ndim != 2:
++        pos = pos.reshape(len(positions), -1)
++    batch_size, seq_len = int(pos.shape[0]), int(pos.shape[1])
++    total = batch_size * seq_len
++
++    # Row-major flat index of every document start (positions reset to 0).
++    # Flattening row-major makes the flat index of token (b, col) equal b*seq_len+col,
++    # and np.flatnonzero already returns them in ascending (row-major) order.
++    boundaries = np.flatnonzero(np.asarray(pos).reshape(-1) == 0).astype(np.int64)
++
++    cu = np.concatenate([boundaries, np.array([total], dtype=np.int64)])
++    seq_lengths = np.diff(cu)
++    max_seqlen = int(seq_lengths.max()) if seq_lengths.size else 0
++
++    return cu.tolist(), max_seqlen

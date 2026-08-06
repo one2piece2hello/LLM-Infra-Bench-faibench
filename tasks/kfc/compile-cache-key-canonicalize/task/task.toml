@@ -1,0 +1,79 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "compile-cache-key-canonicalize"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "You are working on the work-reuse layer of a batch execution service."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 21600
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/insea-compile-cache-key-canonicalize-loop16:loop-20260721T021544Z@sha256:7ec6b99c589607131f4dfa4d19caca7d3542ac0d4b65dcb4f1b8c1a09dfdb070
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-compile-cache-key-canonicalize:oss .`
+[environment]
+docker_image = "fai/kfc-compile-cache-key-canonicalize:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 16000
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timeout_sec = 3600
+task_kind = "acceleration"
+contract_pattern = "A"
+timing_metric = "recompile_count"
+candidate_source_root = "/app/repo"
+primary_edit_paths = ["/app/repo/identity_key.py"]
+forbidden_edit_paths = ["/app/repo/tests/**", "/opt/verifier-*", "/tests/**", "/opt/loop/**"]
+result_paths = [
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+]
+
+[primary_metric]
+name = "signature_identity_recompile_count_speedup"
+goal = "maximize"
+metric_kind = "recompile_count"
+reward_formula = "reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0 per the reward specification (speedup == ref_speedup -> 0.0 (must EXCEED it to score); speedup>=ref_speedup^2 -> 1.0 cap; range [0,1]); reward = 0 on any hard gate, on speedup<=1, or on ref_speedup<=1. acceleration: measured speedup = baseline_recompiles / candidate_recompiles, where recompile_count = the number of DISTINCT identities a module's identity_key produces over a fixed labeled workload of request signatures (48 signatures = 12 true equivalence classes x 4 spellings). Deterministic and hardware-portable (pure-Python stdlib, fixed FNV-1a/sha1 hash; no profiler). The frozen baseline emits one identity per spelling (~48) so its own speedup is ~1.0; a full normalizer emits one per true class (~12) -> speedup ~4.0. The 12-case hidden correctness suite, the whole-workload no-false-merge safety gate (any identity shared by two DIFFERENT true classes = correctness failure -> reward 0), and the anti-cheat (only identity_key.py may change; no tensor/graph framework or harness import) are hard gates."
+ref_speedup = 4.0
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+correctness_gates = [
+    "hidden_case_suite",
+    "returns_string_for_various",
+    "deterministic_repeat_same_object",
+    "deterministic_fresh_build",
+    "distinct_ops_distinct_keys",
+    "distinct_shapes_distinct_keys",
+    "distinct_dtypes_distinct_keys",
+    "distinct_nondefault_flag_distinct_keys",
+    "noncommutative_order_significant",
+    "distinct_operand_count_distinct_keys",
+    "no_false_merge_full_workload",
+    "handles_edge_schema",
+    "many_distinct_programs_pairwise_distinct",
+    "candidate_false_merge",
+    "anti_cheat_forbidden_edit",
+    "forbidden_framework_or_harness_reference",
+]
+
+[loop]
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+mode = "baked"
+feedback_surface = "/opt/loop/submit.sh"
+declared_submission_policy = "single_submission"

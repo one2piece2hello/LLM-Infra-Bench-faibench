@@ -1,0 +1,24 @@
+--- a/fla/ops/nsa/parallel.py
++++ b/fla/ops/nsa/parallel.py
+@@ -1,8 +1,7 @@
+-# Native sparse attention (NSA) forward pass for this repository.
+-# Public entry point: `parallel_nsa`. Its signature defines the accepted tensor
+-# shapes, the GQA relationship between query and key/value heads, the block
+-# selection inputs and the optional variable-length (`cu_seqlens`) form.
+-# The observable output contract is fixed by the repository's tests.
++# NEGATIVE (intentionally WRONG): wraps naive_nsa but forces scale=1.0, i.e. it
++# DROPS the 1/sqrt(K) softmax temperature. The attention distribution becomes far
++# too peaked, so the output diverges from the reference and fails the parity gate.
++# This is a semantic break used only to prove the correctness gate rejects it.
+ import torch
+ 
+ from fla.ops.nsa.naive import naive_nsa
+@@ -29,7 +28,7 @@
+         block_counts=block_counts,
+         block_size=block_size,
+         window_size=window_size,
+-        scale=scale,
++        scale=1.0,  # WRONG: missing 1/sqrt(K) scaling
+         cu_seqlens=cu_seqlens,
+     )
+     if isinstance(out, tuple):

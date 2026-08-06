@@ -1,0 +1,31 @@
+{
+  "schema_version": "kernelbench_correctness_manifest_v1",
+  "task_id": "lowrank-adapter-apply",
+  "task_kind": "acceleration",
+  "expected_case_count": 12,
+  "primary_workload": "lowrank-adapter-apply-geomean-4shapes",
+  "ref_speedup": 1.0,
+  "ref_speedup_note": "Anchor 1.1626 calibrated in oracle mode on NVIDIA H20. tests/ref_speedup.txt is authoritative at scoring; this file is only the in-image fallback. See tests/ref_speedup.caveat.md to re-measure on your hardware.",
+  "metric": "wall_time_ms",
+  "direction": "higher_is_better",
+  "target_hardware": "H20",
+  "value_axis": "flops + peak_memory (avoid forming/consuming the [N,K] delta; proxied by wall-time, corroborated by analytic correction-FLOPs and peak-delta-bytes)",
+  "correctness_axes": [
+    "normal_2d",
+    "normal_3d",
+    "fp32",
+    "boundary_r1",
+    "boundary_r_near_full",
+    "single_row_and_out1",
+    "degenerate_scale_zero",
+    "degenerate_zero_factor_b",
+    "error",
+    "metamorphic_scale_and_additivity",
+    "hidden_large_NK_small_r",
+    "anti_hacking"
+  ],
+  "public_symbol": "lowrank_adapter_apply",
+  "primary_edit_paths": [
+    "/app/repo/lowrank_adapter_apply.py"
+  ]
+}

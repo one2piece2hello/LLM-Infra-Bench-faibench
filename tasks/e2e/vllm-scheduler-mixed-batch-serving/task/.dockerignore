@@ -1,0 +1,11 @@
+# .dockerignore MUST live at the BUILD CONTEXT ROOT (this directory) — docker/BuildKit does
+# NOT read environment/.dockerignore. Build with:  docker build -f environment/Dockerfile .
+solution/
+tests/
+loop_overlay/
+evidence/
+probe/
+*.bak_*
+*.orig_*
+**/__pycache__/
+*.pyc

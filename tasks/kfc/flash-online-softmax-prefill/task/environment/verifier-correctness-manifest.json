@@ -1,0 +1,31 @@
+{
+  "schema_version": "kernelbench_correctness_manifest_v1",
+  "task_id": "flash-online-softmax-prefill",
+  "task_kind": "acceleration",
+  "expected_case_count": 12,
+  "primary_workload": "causal-attention-peakmem-geomean-4shapes",
+  "ref_speedup": 6.0,
+  "ref_speedup_note": "Anchor 6.0 calibrated in oracle mode on NVIDIA H20. tests/ref_speedup.txt is authoritative at scoring; this file is only the in-image fallback. See tests/ref_speedup.caveat.md to re-measure on your hardware.",
+  "metric": "peak_memory_bytes",
+  "direction": "higher_is_better",
+  "target_hardware": "H20",
+  "value_axis": "gpu_peak_memory_allocated (max_memory_allocated; the naive path materializes the (S,S) matrix)",
+  "correctness_axes": [
+    "normal_causal",
+    "normal_noncausal",
+    "normal_gqa",
+    "normal_fp16",
+    "boundary_S_nontile_D64",
+    "degenerate_S1",
+    "error_H_not_multiple_Hkv",
+    "error_dtype",
+    "error_shape",
+    "metamorphic_scale_v",
+    "metamorphic_key_shift",
+    "hidden_bf16_S8192"
+  ],
+  "public_symbol": "causal_attention",
+  "primary_edit_paths": [
+    "/app/repo/causal_attention.py"
+  ]
+}

@@ -1,0 +1,324 @@
+--- a/ib_multisend_planner.py	2026-07-26 18:52:26.563655584 +0800
++++ b/ib_multisend_planner.py	2026-07-26 18:52:26.563655584 +0800
+@@ -24,16 +24,10 @@
+     pair, so the emitted plan is ordered ``for step in qps: for r in reqs``.
+ 
+ Every function here is pure: plain ints and lists in, plain ints and lists out.
+-
+-NOTE FOR IMPLEMENTERS
+----------------------
+-This module is currently the SLOW-BUT-CORRECT reference path: every entry point
+-produces the right answer but re-derives shared quantities from scratch, keeps
+-per-request state in string-keyed dictionaries, and rescans finished plans once
+-per queue pair.  The observable behaviour (return values, exception contracts)
+-is the specification and must not change; the cost model is what needs work.
+ """
+ 
++from itertools import accumulate
++
+ IB_WRITE_CHUNK_ALIGNMENT = 128
+ NCCL_NET_IB_MAX_RECVS = 8
+ NET_IB_MAX_REQUESTS = 128
+@@ -61,14 +55,8 @@
+         raise ValueError("size must be >= 0")
+     if size == 0:
+         return 0
+-    # degraded: walk up to the alignment boundary one byte at a time.
+-    per_qp = size // nqps
+-    if per_qp * nqps < size:
+-        per_qp += 1
+-    span = per_qp
+-    while span % IB_WRITE_CHUNK_ALIGNMENT != 0:
+-        span += 1
+-    return span
++    per_qp = -(-size // nqps)
++    return -(-per_qp // IB_WRITE_CHUNK_ALIGNMENT) * IB_WRITE_CHUNK_ALIGNMENT
+ 
+ 
+ def pack_wr_ids(slot, nreqs):
+@@ -83,14 +71,7 @@
+     if nreqs < 1 or nreqs > NCCL_NET_IB_MAX_RECVS:
+         raise ValueError("nreqs out of range 1..%d" % NCCL_NET_IB_MAX_RECVS)
+     byte = slot & 0xFF
+-    # degraded: rebuild every prefix sum from scratch.
+-    out = []
+-    for r in range(nreqs):
+-        acc = 0
+-        for j in range(r + 1):
+-            acc += byte << (j * 8)
+-        out.append(acc)
+-    return out
++    return list(accumulate(byte << (r * 8) for r in range(nreqs)))
+ 
+ 
+ def match_send_slot(slots, expected_idx, tag, size, taken):
+@@ -112,19 +93,17 @@
+     nreqs = slots[0]["nreqs"]
+     if nreqs < 1 or nreqs > NCCL_NET_IB_MAX_RECVS:
+         raise ValueError("nreqs out of range 1..%d" % NCCL_NET_IB_MAX_RECVS)
+-    # degraded: materialise the whole candidate table on every call, then scan it.
+-    table = []
+     for r in range(nreqs):
++        if taken[r]:
++            continue
+         s = slots[r]
+-        table.append((r, s["tag"], s["size"], s["addr"], s["rkeys"][0], bool(taken[r])))
+-    hits = [row for row in table if row[1] == tag and not row[5]]
+-    for row in hits:
+-        r = row[0]
+-        if row[2] < 0 or row[3] == 0 or row[4] == 0:
++        if s["tag"] != tag:
++            continue
++        if s["size"] < 0 or s["addr"] == 0 or s["rkeys"][0] == 0:
+             raise ValueError(
+                 "peer posted incorrect receive info: req %d/%d tag %x" % (r, nreqs, tag)
+             )
+-        return (r, min([size, row[2]]))
++        return (r, size if size < s["size"] else s["size"])
+     return (-1, -1)
+ 
+ 
+@@ -141,17 +120,13 @@
+         raise ValueError("qp_dev/qp_remdev must have nqps entries")
+     if req_id < 0:
+         raise ValueError("req_id must be >= 0")
+-    # degraded: build a lookup dict, then rebuild the ordering out of it.
+-    devs = {}
+-    for q in range(nqps):
+-        devs["q%d" % q] = (qp_dev[q], qp_remdev[q])
+-    order = []
+-    for i in range(nqps):
+-        order.append((req_id + i) % nqps)
++    base = req_id % nqps
+     out = []
+-    for q in order:
+-        d, rd = devs["q%d" % q]
+-        out.append((q, d, rd))
++    for i in range(nqps):
++        q = base + i
++        if q >= nqps:
++            q -= nqps
++        out.append((q, qp_dev[q], qp_remdev[q]))
+     return out
+ 
+ 
+@@ -175,9 +150,7 @@
+     extra = bool(nreqs > 1 or (not (rem_ooo and local_ooo) and ar and req0_size > ar_threshold))
+     imm = (req0_id % UINT32_MAX) if matching_scheme == MATCH_BY_ID else req0_size
+     imm &= UINT32_MAX
+-    # degraded: byte-swap through a hex string instead of int.to_bytes().
+-    hx = "%08x" % imm
+-    imm_be = int(hx[6:8] + hx[4:6] + hx[2:4] + hx[0:2], 16)
++    imm_be = int.from_bytes(imm.to_bytes(4, "little"), "big")
+     plan = {
+         "extra_wr": extra,
+         "opcode": OPCODE_RDMA_WRITE_WITH_IMM,
+@@ -191,11 +164,7 @@
+         plan["num_sge"] = 1
+         plan["sizes_len"] = nreqs * SIZEOF_INT
+         plan["remote_addr"] = cmpls_addr + slot * COMPLETION_RECORD_SIZE
+-        # degraded: copy the rkey table one element at a time.
+-        rk = []
+-        for d in range(len(cmpls_rkeys)):
+-            rk.append(cmpls_rkeys[d])
+-        plan["rkey_by_dev"] = rk
++        plan["rkey_by_dev"] = list(cmpls_rkeys)
+     else:
+         plan["num_sge"] = 0
+         plan["sizes_len"] = 0
+@@ -204,38 +173,6 @@
+     return plan
+ 
+ 
+-_WR_COLUMNS = ("qp_index", "dev_index", "req_index", "length", "num_sge",
+-               "lkey", "rkey", "laddr", "raddr", "wr_id")
+-
+-
+-def _wr_record(state, sizes, lkeys, rkeys, slot, nreqs, r, qp_index, dev_index,
+-               rem_dev_index):
+-    """One work-request record; mutates the per-request cursor state in place."""
+-    size = sizes[r]
+-    off = state["off:%d" % r]
+-    cur = state["cur:%d" % r]
+-    left = size - off
+-    length = left if left < cur else cur
+-    rec = {
+-        "qp_index": qp_index,
+-        "dev_index": dev_index,
+-        "req_index": r,
+-        "length": length,
+-        "num_sge": 1 if length else 0,
+-        "lkey": lkeys[r][dev_index] if length else 0,
+-        "rkey": rkeys[r][rem_dev_index],
+-        "laddr": state["laddr:%d" % r],
+-        "raddr": state["raddr:%d" % r],
+-        "wr_id": pack_wr_ids(slot, nreqs)[r],
+-    }
+-    state["cur:%d" % r] = length
+-    new_off = off + length
+-    state["off:%d" % r] = new_off if new_off < size else size
+-    state["laddr:%d" % r] = state["laddr:%d" % r] + length
+-    state["raddr:%d" % r] = state["raddr:%d" % r] + length
+-    return rec
+-
+-
+ def plan_multisend(sizes, data_addrs, lkeys, remote_addrs, rkeys, slot, nqps,
+                    qp_dev, qp_remdev, req0_id):
+     """Build the whole QP-major work-request plan for one CTS batch.
+@@ -256,72 +193,113 @@
+         raise ValueError("nreqs out of range 1..%d" % NCCL_NET_IB_MAX_RECVS)
+     if not (len(data_addrs) == len(lkeys) == len(remote_addrs) == len(rkeys) == nreqs):
+         raise ValueError("ragged per-request inputs")
+-    # degraded: string-keyed cursor state, one dict per work request, and the QP
+-    # ring plus the wr_id table are re-derived on every step.
+-    state = {}
++    ring = qp_ring(nqps, req0_id, qp_dev, qp_remdev)
++    wr_ids = pack_wr_ids(slot, nreqs)
++
++    # Per-request length vector in closed form.  With C = chunk_span(size, nqps)
++    # the sequence is [C] * (size // C) then the remainder then zeros.
++    lens_by_req = []
++    offs_by_req = []
+     chunks = []
+     for r in range(nreqs):
+-        if sizes[r] < 0:
++        size = sizes[r]
++        if size < 0:
+             raise ValueError("negative send size")
+-        span = chunk_span(sizes[r], nqps)
++        span = chunk_span(size, nqps)
+         chunks.append(span)
+-        state["off:%d" % r] = 0
+-        state["cur:%d" % r] = span
+-        state["laddr:%d" % r] = data_addrs[r]
+-        state["raddr:%d" % r] = remote_addrs[r]
+-
+-    cols = {}
+-    for name in _WR_COLUMNS:
+-        cols[name] = []
++        if span == 0:
++            lens = [0] * nqps
++        else:
++            full = size // span
++            if full >= nqps:
++                lens = [span] * nqps
++            else:
++                lens = [span] * full + [size - full * span] + [0] * (nqps - full - 1)
++        lens_by_req.append(lens)
++        offs = [0]
++        offs.extend(accumulate(lens))
++        offs_by_req.append(offs)
++
++    n = nqps * nreqs
++    lens_rows = list(zip(*lens_by_req))          # step-major length rows
++    laddr_by_req = [[data_addrs[r] + o for o in offs_by_req[r][:nqps]]
++                    for r in range(nreqs)]
++    raddr_by_req = [[remote_addrs[r] + o for o in offs_by_req[r][:nqps]]
++                    for r in range(nreqs)]
++    laddr_rows = list(zip(*laddr_by_req))
++    raddr_rows = list(zip(*raddr_by_req))
++
++    col_qp = []
++    col_dev = []
++    col_len = []
++    col_lkey = []
++    col_rkey = []
++    col_laddr = []
++    col_raddr = []
++    col_req = list(range(nreqs)) * nqps
++    col_wrid = wr_ids * nqps
++    lkey_cols = {}
++    rkey_cols = {}
++
+     for i in range(nqps):
+-        ring = qp_ring(nqps, req0_id, qp_dev, qp_remdev)
+         qp_index, dev_index, rem_dev_index = ring[i]
+-        for r in range(nreqs):
+-            rec = _wr_record(state, sizes, lkeys, rkeys, slot, nreqs, r,
+-                             qp_index, dev_index, rem_dev_index)
+-            for name in _WR_COLUMNS:
+-                cols[name].append(rec[name])
++        row = lens_rows[i]
++        col_qp.extend([qp_index] * nreqs)
++        col_dev.extend([dev_index] * nreqs)
++        col_len.extend(row)
++        lk = lkey_cols.get(dev_index)
++        if lk is None:
++            lk = [lkeys[r][dev_index] for r in range(nreqs)]
++            lkey_cols[dev_index] = lk
++        col_lkey.extend(lk)
++        rk = rkey_cols.get(dev_index)
++        if rk is None:
++            rk = [rkeys[r][dev_index] for r in range(nreqs)]
++            rkey_cols[dev_index] = rk
++        col_rkey.extend(rk)
++        col_laddr.extend(laddr_rows[i])
++        col_raddr.extend(raddr_rows[i])
++    col_sge = [1 if length else 0 for length in col_len]
+ 
+-    out = {
+-        "n": nqps * nreqs,
++    return {
++        "n": n,
+         "nqps": nqps,
+         "nreqs": nreqs,
+         "opcode": OPCODE_RDMA_WRITE,
++        "qp_index": col_qp,
++        "dev_index": col_dev,
++        "req_index": col_req,
++        "length": col_len,
++        "num_sge": col_sge,
++        "lkey": col_lkey,
++        "rkey": col_rkey,
++        "laddr": col_laddr,
++        "raddr": col_raddr,
++        "wr_id": col_wrid,
+         "chunk": chunks,
+-        "posted": [state["off:%d" % r] for r in range(nreqs)],
++        "posted": [offs_by_req[r][nqps] for r in range(nreqs)],
+     }
+-    for name in _WR_COLUMNS:
+-        out[name] = cols[name]
+-    return out
+ 
+ 
+ def multisend_stats(plan):
+     """Aggregate a plan: per-QP and per-request byte counts plus WR shape."""
+     nqps = plan["nqps"]
+     nreqs = plan["nreqs"]
+-    n = plan["n"]
+-    # degraded: one full rescan of the plan per queue pair and per request.
+-    per_qp = []
+-    for qp in range(nqps):
+-        per_qp.append(sum([plan["length"][j] for j in range(n)
+-                           if plan["qp_index"][j] == qp]))
+-    per_req = []
+-    for r in range(nreqs):
+-        per_req.append(sum([plan["length"][j] for j in range(n)
+-                            if plan["req_index"][j] == r]))
+-    zero_len = len([j for j in range(n) if plan["length"][j] == 0])
+-    sge_wrs = len([j for j in range(n) if plan["length"][j] != 0])
+-    max_len = 0
+-    for j in range(n):
+-        if plan["length"][j] > max_len:
+-            max_len = plan["length"][j]
++    lengths = plan["length"]
++    qp_col = plan["qp_index"]
++    per_qp = [0] * nqps
++    for i in range(nqps):
++        lo = i * nreqs
++        per_qp[qp_col[lo]] += sum(lengths[lo:lo + nreqs])
++    per_req = [sum(lengths[r::nreqs]) for r in range(nreqs)]
++    zero_len = lengths.count(0)
+     return {
+         "bytes_per_qp": per_qp,
+         "bytes_per_req": per_req,
+         "total_bytes": sum(per_req),
+         "zero_len_wrs": zero_len,
+-        "sge_wrs": sge_wrs,
+-        "max_len": max_len,
++        "sge_wrs": len(lengths) - zero_len,
++        "max_len": max(lengths) if lengths else 0,
+     }
+ 
+ 

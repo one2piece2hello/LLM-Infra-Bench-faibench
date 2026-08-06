@@ -1,0 +1,86 @@
+--- a/bench_bigo.py
++++ b/bench_bigo.py
+@@ -25,29 +25,15 @@
+     * ``"coef"``       : ``float64`` array ``(B,)`` -- the chosen curve's coefficient;
+     * ``"rms"``        : ``float64`` array ``(B,)`` -- the chosen curve's mean-normalized RMS.
+ """
+-# NAIVE_PER_CURVE_PYTHON_FIT: correct but slow reference fit -- an explicit
+-# double loop over benchmarks x candidate curves with scalar Python accumulators
+-# for the least-squares sums and the residual RMS. Behaviour-equivalent to the
+-# vectorized batch fit; just slow.
+-import math
+-
+ import numpy as np
+ 
+ _LABELS = ["(1)", "lgN", "N", "NlgN", "N^2", "N^3"]
+ 
+ 
+-def _curve(kind, n):
+-    if kind == 0:
+-        return 1.0
+-    if kind == 1:
+-        return math.log2(n)
+-    if kind == 2:
+-        return float(n)
+-    if kind == 3:
+-        return float(n) * math.log2(n)
+-    if kind == 4:
+-        return float(n) * float(n)
+-    return float(n) * float(n) * float(n)
++def _curve_matrix(ns):
++    n = np.asarray(ns, dtype=np.float64).ravel()
++    log2n = np.log2(n)
++    return np.stack([np.ones_like(n), log2n, n, n * log2n, n * n, n * n * n], axis=0)
+ 
+ 
+ def compute_bigo(ns, times):
+@@ -66,36 +52,21 @@
+     if t.ndim != 2 or t.shape[1] != ns.shape[0]:
+         raise ValueError("times must have shape (B, K) matching ns of shape (K,)")
+     B, K = t.shape
++    G = _curve_matrix(ns)                        # (6, K)
++    sigma_g2 = np.square(G).sum(axis=1)          # (6,)
+     complexity = []
+     coef_out = np.empty(B, dtype=np.float64)
+     rms_out = np.empty(B, dtype=np.float64)
++    # per-benchmark loop; each row's six fits are resolved with vectorized ops.
+     for b in range(B):
+-        best_j = 0
+-        best_coef = 0.0
+-        best_rms = None
+-        mean_t = 0.0
+-        for i in range(K):
+-            mean_t += float(t[b, i])
+-        mean_t /= K
+-        for j in range(6):
+-            sigma_g2 = 0.0
+-            sigma_tg = 0.0
+-            for i in range(K):
+-                g = _curve(j, ns[i])
+-                sigma_g2 += g * g
+-                sigma_tg += float(t[b, i]) * g
+-            coef = sigma_tg / sigma_g2
+-            resid = 0.0
+-            for i in range(K):
+-                fit = coef * _curve(j, ns[i])
+-                d = float(t[b, i]) - fit
+-                resid += d * d
+-            rms = math.sqrt(resid / K) / mean_t
+-            if best_rms is None or rms < best_rms:
+-                best_rms = rms
+-                best_coef = coef
+-                best_j = j
+-        complexity.append(_LABELS[best_j])
+-        coef_out[b] = best_coef
+-        rms_out[b] = best_rms
++        row = t[b]
++        sigma_tg = G @ row                       # (6,)
++        coef = sigma_tg / sigma_g2               # (6,)
++        fit = coef[:, None] * G                  # (6, K)
++        resid = np.square(row[None, :] - fit).sum(axis=1)   # (6,)
++        rms = np.sqrt(resid / K) / row.mean()    # (6,)
++        j = int(np.argmin(rms))
++        complexity.append(_LABELS[j])
++        coef_out[b] = coef[j]
++        rms_out[b] = rms[j]
+     return {"complexity": complexity, "coef": coef_out, "rms": rms_out}

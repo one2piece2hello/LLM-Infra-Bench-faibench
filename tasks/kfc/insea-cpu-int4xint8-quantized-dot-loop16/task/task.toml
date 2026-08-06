@@ -1,0 +1,80 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "insea-cpu-int4xint8-quantized-dot-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "You are working on the inner product of two integer vectors that are stored in a compact block-encoded form (the building block of a block-encoded …"
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 21600
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/insea-cpu-int4xint8-quantized-dot-loop16:loop-20260721T021544Z@sha256:91ce81d4514574db1f5324b9c93807ea5cd9e138299da77fc46523a7b31e70e7
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-insea-cpu-int4xint8-quantized-dot-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-insea-cpu-int4xint8-quantized-dot-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 16000
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timeout_sec = 3600
+task_kind = "acceleration"
+contract_pattern = "A"
+timing_metric = "callgrind_ir"
+candidate_source_root = "/app/repo"
+primary_edit_paths = ["/app/repo/blocked_dot.py"]
+forbidden_edit_paths = ["/app/repo/tests/**", "/opt/verifier-*", "/tests/**", "/opt/loop/**"]
+result_paths = [
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+]
+
+[primary_metric]
+name = "blocked_dot_ir_speedup"
+goal = "maximize"
+metric_kind = "instruction_count"
+reward_formula = "performance (the reward specification): reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0; matching the oracle scores 0.5, reaching oracle^2 caps at 1.0, range [0,1]. Pre-gates that force reward=0: build/import failure, ANY correctness case fail, anti-cheat trip, forbidden-path edit, speedup<=1, ref_speedup<=1. ONE graded submission only (min=max=1); submit == finalize."
+ref_speedup = 1.25313
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+correctness_gates = [
+    "hidden_case_suite",
+    "normal_single_block_hand",
+    "normal_multi_block_matches_reference",
+    "boundary_single_block",
+    "boundary_empty_blocks",
+    "degenerate_zero_scale_block",
+    "degenerate_all_min_code",
+    "sign_zero_point_applied",
+    "sign_low_high_lane_pairing",
+    "error_block_count_mismatch",
+    "error_packed_block_length",
+    "error_code_block_length",
+    "metamorphic_scale_linearity",
+    "metamorphic_negate_codes",
+    "hidden_large_matches_reference",
+    "candidate_reference_agreement",
+    "anti_cheat_forbidden_edit",
+    "forbidden_array_library_dot",
+]
+
+[loop]
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+mode = "baked"
+feedback_surface = "/opt/loop/submit.sh"

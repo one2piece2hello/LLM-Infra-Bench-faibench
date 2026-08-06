@@ -1,0 +1,191 @@
+{
+  "task_id": "e2e-b1-kv-traffic-sol",
+  "lane": "e2e_task",
+  "family": "B_serving",
+  "task_kind": "performance",
+  "metric": "log_speedup_vs_ref_speedup",
+  "reward_model": "reward_md_log_speedup_v2_oracle_zero",
+  "reward_formula": "reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0; range [0,1]; speedup == ref_speedup => 0.0 (must EXCEED it to score); speedup >= ref_speedup^2 => 1.0",
+  "abba_pairs": 5,
+  "abba_max_seconds": 9000,
+  "ref_speedup": {
+    "value": 2.5799320719769216,
+    "status": "CALIBRATED",
+    "metric": "median measured ABBA speedup of the ORACLE (reviewer fused-Triton kernel) over the strong baseline, under the SHIPPED verifier and the SHIPPED protocol (5 alternating ABBA pairs per run, per-pair ratio = geomean over the 9 hidden timed cases of baseline_ms/candidate_ms)",
+    "oracle_impl": "solution/ceiling_triton_fused.py (reviewer-only, NEVER in the image, NEVER run at scoring)",
+    "calibrated_on": "NVIDIA H20, driver 550.144.03, 2026-07-27",
+    "n_runs": 3,
+    "n_paired_measurements": 15,
+    "raw_values": [
+      2.5878690508408373,
+      2.5799320719769216,
+      2.5540988353968617
+    ],
+    "raw_pair_ratios": [
+      [
+        2.562156,
+        2.587869,
+        2.617725,
+        2.520779,
+        2.630751
+      ],
+      [
+        2.579932,
+        2.534475,
+        2.594112,
+        2.624042,
+        2.574247
+      ],
+      [
+        2.632865,
+        2.554099,
+        2.553693,
+        2.540975,
+        2.615785
+      ]
+    ],
+    "spread_pct_of_median": 1.3,
+    "cv_in_run": {
+      "baseline": 0.01039,
+      "candidate": 0.02207
+    },
+    "independent_cross_check": "the pre-migration archived measurement of the SAME oracle on an INDEPENDENT session (794fb895, 2026-07-26) was 2.622678 — 1.6% above this median, i.e. the constant is reproducible across sessions/cards. Using 2.6227 instead would move the oracle reward from 0.5000 to 0.4931.",
+    "caveats": "reward.md asks for the median of >= 5 oracle RUNS; this is the median of 3 runs, each of which is itself the median of 5 alternating ABBA pairs (15 paired measurements). Adding runs is cheap (165 s per run) but the observed spread is 1.3%, i.e. +-0.004 of reward.",
+    "legality_check": "ref_speedup 2.57993 >= 1.15 (reward.md 出题合法性约束) PASS",
+    "measured_ladder_same_session": {
+      "shipped_naive_skeleton": {
+        "speedup": 0.008919205257568076,
+        "reward": 0.0,
+        "reason": "speedup_not_above_baseline (gate 5); ABBA early-abort after 1 pair, 20.6 s"
+      },
+      "strong_baseline": {
+        "speedup": 1.0,
+        "reward": 0.0,
+        "note": "by definition; baseline drift vs the calibrated absolute anchor 0.13014 measured at 0.1-0.6%"
+      },
+      "oracle": {
+        "speedup": 2.5799320719769216,
+        "reward": 0.5
+      },
+      "cap_1.0_requires_speedup": 6.656
+    },
+    "hardware_caveat": "此 ref_speedup(=2.5799320719769216)在 H20 上标定;若运行硬件与 H20 不一致(GPU 峰值不同),请先用 oracle 实现 solution/ceiling_triton_fused.py 在本机重新标定该锚点,再计分。",
+    "recalibrate_howto": {
+      "step1_measure": "docker run --rm --gpus all -v \"$PWD/tests:/tests:ro\" -v \"$PWD/solution:/opt/negative:ro\" -e VERIFIER_MODE=ceiling_triton_fused <image> bash /tests/test.sh",
+      "step2_read": "取 /logs/verifier/benchmark_results.json 里 oracle 的 speedup(建议 >=3 次取中位数)",
+      "step3_write": "把该中位数写回本文件 ref_speedup.value,并更新 status/calibrated_on",
+      "note": "verifier 通过 $NEGATIVE_DIR(默认 /opt/negative)定位 ceiling 实现;候选名解析: <mode>.py / <bare>.py / negative_<bare>.py"
+    }
+  },
+  "base_image": "<internal registry>/kernelbench/wro-vllm-consistent-repo-base:v1@sha256:64a9efc82e1003574ee10461382ae088f12e2fa3432b080dbd72d3e73630c259",
+  "source_commit": "1da94e673c257373280026f75ceb4effac80e892",
+  "baked_repo_commit_subject": "baseline",
+  "expected_case_count": 9,
+  "expected_correctness_case_count": 16,
+  "expected_case_ids": [
+    "t1_gather_gqa8_ragged",
+    "t2_gather_tinyrow_h1d64",
+    "t3_gather_page64_h2d64",
+    "t4_gather_wide_h1d576",
+    "t5_scatter_gqa8_ragged",
+    "t6_scatter_tinyrow_h1d64",
+    "t7_scatter_page256_h4d128",
+    "t8_copypages_page16_gqa8",
+    "t9_copypages_wide_h1d576"
+  ],
+  "expected_correctness_case_ids": [
+    "c01_single_partial_page",
+    "c02_exact_page_multiple",
+    "c03_partial_tail_mixed",
+    "c04_unaligned_subranges",
+    "c05_shuffled_pages",
+    "c06_shared_pages_prefix",
+    "c07_max_length_single",
+    "c08_zero_length_ranges",
+    "c09_page64_single_big",
+    "c10_page_size_one",
+    "c11_wide_rows_h1d576",
+    "c12_six_layers_independent",
+    "c13_copy_pages_roundtrip",
+    "c14_float16_dtype",
+    "c15_single_token_writes",
+    "c16_oversized_chunk_writes"
+  ],
+  "measured_h20_peak": {
+    "peak_hbm_gbps": 3687.3,
+    "peak_hbm_gbps_reproduced": 3683.0,
+    "peak_hbm_gbps_median": 3671.4,
+    "read_bound_gbps": 3671.8,
+    "copy_bound_contiguous_gbps": 3463.7,
+    "copy_bound_page_run_gbps": {
+      "page16_row2048B": 3207.0,
+      "page16_row128B": 2124.9,
+      "page64_row256B": 3220.8,
+      "page64_row1152B": 3245.7,
+      "page256_row1024B": 3316.3
+    },
+    "device": "NVIDIA H20 sm90 95GiB, driver 550.144.03",
+    "measured_on": "NVIDIA H20 2026-07-26",
+    "harness_denominator_gbps": 3687.3,
+    "method": "peak = 3-stream fp32 elementwise add over 512 MiB buffers, best of 30 (measured twice in two independent sessions: 3687.3 and 3683.0, a 0.1% spread; the harness denominator is 3687.3 and every calibrated number in this manifest was produced with it); read-bound = vectorised Triton grid-stride reduce over 2 GiB; copy-bound = vectorised Triton grid-stride copy over 1 GiB (torch copy_ reaches only 2082.9); copy-bound page-run = the same copy kernel restricted to shuffled page-sized runs, i.e. the honest achievable ceiling for THIS task's traffic at each page/row geometry"
+  },
+  "strong_baseline": {
+    "impl": "tests/harness/baseline_kv_traffic.py",
+    "geomean_sol_fraction": 0.13014,
+    "calibrated_on": "NVIDIA H20 2026-07-26 (device-synced timing harness; mean of 4 fresh sub-process measurements measured 0.13253 / 0.13163 / 0.12877 / 0.12761, spread 3.9%)",
+    "calibrated_on_event_timing_harness": 0.13657,
+    "per_case": {
+      "t1_gather_gqa8_ragged": 0.1008,
+      "t2_gather_tinyrow_h1d64": 0.0796,
+      "t3_gather_page64_h2d64": 0.0865,
+      "t4_gather_wide_h1d576": 0.0928,
+      "t5_scatter_gqa8_ragged": 0.18,
+      "t6_scatter_tinyrow_h1d64": 0.1258,
+      "t7_scatter_page256_h4d128": 0.1909,
+      "t8_copypages_page16_gqa8": 0.2335,
+      "t9_copypages_wide_h1d576": 0.2546
+    },
+    "reward_noise_floor": "baseline-vs-itself measured 0.9965 and 1.0362 in the same session (+-3.6% on the REWARD, which is what matters: the reward divides by a baseline re-measured in the same run, so absolute drift largely cancels); per-case step-time spread within a run 1-5%",
+    "noise_floor_pct_per_case": "1-5 (device-synced harness); 0.09-1.55 (event harness)"
+  },
+  "gates": {
+    "bit_exact_roundtrip": "torch.equal on every gathered/copied element",
+    "poison_full_write": "verifier-owned outputs pre-filled with -12345.0",
+    "no_alias": "source buffers overwritten after every scatter, then read back",
+    "current_plan": "two begin_step calls back to back; the second must win",
+    "page_addressing": "gather request b through request (b+1)'s PAGES: storage must be addressed by the physical page the block table names, not by (request, position)",
+    "pool_footprint": "DUAL: live bytes <= 1.10x nominal pool after allocate() AND again after the write phase (a lazily built shadow layout cannot slip past the first check)",
+    "peak_alloc": "pool budget + working allowance + the harness's own buffers",
+    "plausibility_hard_fail_sol": 1.02,
+    "timing": "harness-owned time.perf_counter bracketed by full torch.cuda.synchronize() on both sides of the step (side-stream work cannot escape the window); a CUDA-event pair is reported alongside as a cross-check"
+  },
+  "frozen_surface_sha256": {
+    "compute_reward.py": "5d543823fa6af733a9232bc6f22289bc2d21c27d211fdf65683b4ea89aa5200b",
+    "test.sh": "20c5abcfdfd9fd2b2849a3d52d1458bb9fc36977ae4332eb04b82cfe1530a4f8",
+    "harness/bench_kvtraffic.py": "f1b3775966170fc44c458b8daf4a992f97b187231e578c5686bc9678cfa9f357",
+    "harness/baseline_kv_traffic.py": "2cd51be47369c9fb4d841c085e2ed548334f7d505dcfb5d670c59c242f89ecc0",
+    "harness/hidden_suite.json": "e6527ce74ae3836f81637e676e71a56977bf14bb53bd3b3eaf9cda507db349e3"
+  },
+  "note": "Uploaded FRESH at scoring; the baked /opt/verifier copy is a root-0700 fallback only. Regenerate with solution/gen_manifest.py after any edit.",
+  "anti_cheat_remediation_20260726": "loop16 per-round leak channel closed : verifier stdout->private root-0600 log, /logs/verifier 5-file output redacted to reward+gate+category, EXIT-trap artifact copy disabled, emit_zero reason categorised - all gated on LOOP_DEV_OUT so the authoritative single-shot path keeps full diagnostics. frozen_surface_sha256 re-pinned.",
+  "frozen_surface_sha256_history": [
+    {
+      "file": "test.sh",
+      "was": "9bccabbd1cfe9e345894afbfd3821519b0bf0551701cda7d6fc42d53314955f2",
+      "now": "2f1b07f196d2ad1e367db54ead1a457eedd238d2b68fe246e37d86180d9f9471",
+      "why": "reward.md gate 5 (speedup<=1) removed from the loop16 verdict's hard_fails so a correct-but-slower round is no longer reported as 'correctness: FAIL'. Reward semantics unchanged."
+    },
+    {
+      "file": "harness/bench_kvtraffic.py",
+      "was": "2be926b2b467d8b576731104b63ed00e924fc64282bb75d24ea31b17ad1b4420",
+      "now": "661a2422e4be8b5c758bd987970fada97a908c7db3713f0b20302f6b4ec39865",
+      "why": "vacuity sweep: (1) the timing/comparison primitives are now bound to their original function objects BEFORE any candidate module is imported, and _assert_pristine() HARD FAILs if the candidate replaced one - MEASURED: a candidate identical to the strong baseline plus a patched time.perf_counter scored reward 0.718 (speedup 3.9036) with an empty hard_fail_reasons; (2) the timed workload is now MUTATED between timed blocks and the last output written is re-verified, so a memoised/replayed result is stale - MEASURED sol_fraction 9.122 (varlen) / 7.714 (kv) from a replaying candidate that passed every correctness and anti-cheat probe. NOTHING was removed, no tolerance loosened; both additions sit OUTSIDE the timed window so the measured speedup semantics are unchanged (re-anchored after the change)."
+    },
+    {
+      "file": "compute_reward.py",
+      "was": "65f3db2b9ab56290972f990a9e07f91ea2704abf261f8bdd20828ca3ebbbd091",
+      "now": "6a56026cbcfbea0c3c52779292e28978b90e336e9fa6c1ec0936c6f09da3cd76",
+      "why": "2026-07-28 vacuity sweep V6: a harness-integrity HardFail now reports the NAMED anti-cheat reason `cheating_harness_tamper` (reward.md 前置门 3) instead of the generic build_or_entry_contract_failed. Reward semantics unchanged (both are 0)."
+    }
+  ]
+}

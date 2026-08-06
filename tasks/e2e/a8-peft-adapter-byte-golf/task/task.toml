@@ -1,0 +1,119 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "a8-peft-adapter-byte-golf"
+bench = "e2e"
+kind = "performance"
+language = "python"
+title = "Adapt a frozen language model to a new domain — with a hard budget on the bytes you may ship"
+ext_id = "e2e-a8-peft-adapter-byte-golf"
+difficulty = "hard"
+category = "ml_training"
+lane = "e2e_task"
+family = "C_quality_budget"
+author = "fai-bench"
+tags = [
+    "python",
+    "pytorch",
+    "peft",
+    "lora",
+    "parameter-efficient-fine-tuning",
+    "quantization",
+    "quality-under-budget",
+    "parameter-golf",
+    "h20",
+    "e2e-optimization",
+]
+description = "A8 参数高效微调 PEFT. Adapt a FROZEN pretrained base model (Qwen2.5-0.5B-Instruct) to a new target domain while shipping at most 320 KiB of adaptation (adapter payload + loader code, both re-measured by the harness). The harness loads the base weights itself from a digest-checked read-only copy and quarantines every solver-writable path for the eval window, so the byte cap is an information-theoretic bound on the adaptation. Scored on the fraction of the achievable adaptation gain captured on a hidden held-out split: gain_ratio = (base_CE - candidate_CE) / (base_CE - strong_reference_CE), fed into reward.md's BOUNDED log form reward = min(1.0, ln(gain_ratio/REF)/ln(REF)) if gain_ratio > REF else 0.0 with REF a frozen constant calibrated from a demonstrated in-budget ceiling — so a gain_ratio of 1.0 (tying the strong reference) scores 0, the calibrated ceiling scores 0.5, and the reward saturates at 1.0. Reward range is [0,1]. Whole PEFT repo editable except a small frozen eval surface. Single-shot, eval-only."
+instruction = "instruction.md"
+
+[agent]
+# The solver iterates its own PEFT recipe locally in its session and submits ONE artifact.
+timeout_sec = 18000
+
+# pinned by digest: the key had been absent,
+# which the calibration driver hides because it pulls by digest itself.
+# Open-source build: `cd task && docker build -f environment/Dockerfile -t fai/e2e-a8-peft-adapter-byte-golf:oss .`
+# provenance (original internal image, not publicly pullable): <internal registry>/kernelbench/e2e-a8-peft-adapter-byte-golf:v5-timer@sha256:c28469fe111cac4be40afea0c7aed06c639024b65cebb530b5d7a4ffa6e978ff
+# 🔁 LOOP16: the shipped image is the loop16 overlay (`crane append` onto the :oss base, purely
+#    additive — /opt/loop + /app/instruction.md only, NOTHING under tests/ changed). Build in two steps:
+#      docker build -f environment/Dockerfile             -t fai/e2e-a8-peft-adapter-byte-golf:oss .
+#      docker build -f environment/loop_overlay/Dockerfile -t fai/e2e-a8-peft-adapter-byte-golf:oss-loop16 environment/loop_overlay
+#    The single-shot form (:oss) is a valid alternative; the graded surface (tests/) is identical in both.
+[environment]
+docker_image = "fai/e2e-a8-peft-adapter-byte-golf:oss-loop16"
+dockerfile = "environment/loop_overlay/Dockerfile"
+dockerfile_single_shot = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 49152
+gpus = 1
+# H20 只是**锚点标定用卡**,不是硬性限制。换卡时:
+#   1) 按 tests/verifier-correctness-manifest.json 的 recalibrate_howto 重新标定锚点;
+#   2) 用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像(8.0 A100 / 8.9 L40S·4090 / 9.0 H100·H20 / 10.0 B200)。
+gpu_types = ["H20"]
+storage_mb = 40960
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+# EVAL-ONLY: two frozen-base loads + a median-of-3-shifted-pass held-out CE eval on each,
+# plus the solver's build hook (<=90 s). No training in the candidate path.
+timeout_sec = 1800
+task_kind = "e2e_optimization"
+submission_root = "/app/submission"
+# The whole /app/repo (peft) + /app/submission is editable EXCEPT the frozen eval surface.
+forbidden_edit_paths = [
+    "tests/compute_reward.py",
+    "tests/test.sh",
+    "tests/holdout_corpus.txt",
+    "tests/verifier-correctness-manifest.json",
+    "/app/base_model",
+]
+result_paths = [
+    "/logs/verifier/reward.txt",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/metrics.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+    "/logs/verifier/verifier_state.json",
+]
+
+[verifier.frozen]
+note = "v1 声明不出 primary_edit_paths:整个 repo 可编辑,被计分的交付物在 [verifier].submission_root 下;评分面靠 [verifier].forbidden_edit_paths + tests/test.sh 里的 sha256 门冻结。"
+
+[primary_metric]
+name = "reward"
+goal = "maximize"
+# the bench reward spec 性能类 (BOUNDED to [0,1]):
+#   gain_ratio = (base_ce - candidate_ce) / (base_ce - strong_baseline_ce) on the hidden held-out
+#               split, base_ce MEASURED LIVE on the frozen base model in the same pass
+#   reward     = min(1.0, ln(gain_ratio/ref_speedup)/ln(ref_speedup)) if gain_ratio > ref_speedup else 0.0
+# ref_speedup = 1.2326578617539896 is a FROZEN CONSTANT in the tests/ manifest (the MEASURED
+# in-budget int4 ceiling; >= reward.md's 1.15 authoring floor) — the scorer NEVER runs the oracle.
+# gain_ratio <= ref_speedup (tying the reference, or merely reaching the ceiling) => 0;
+# == ref_speedup**1.5 => 0.5; >= ref_speedup**2 => 1.0.  You must EXCEED ref_speedup to score.
+# NOT the old open-ended un-capped ratio, which put the measured ceiling at 1.2327, outside [0,1].
+# 🔴 `speedup` in the result JSON is this QUALITY ratio, not a wall-clock ratio: nothing is timed
+# (metric_kind = quality_ratio_NOT_time_speedup, timing_measured = false).
+reward_formula = "reward.md 性能类 bounded log form on the adaptation-gain ratio; 0 on any of the six pre-gates (build/import/readiness, any correctness case, cheating, forbidden_edit_paths, gain_ratio<=1, ref_speedup<=1), each with a named reason"
+source = "/logs/verifier/metrics.json"
+ref_speedup = 1.2326578617539896
+ref_speedup_source = "tests/verifier-correctness-manifest.json"
+calibrated_on = "NVIDIA H20"
+
+# loop16: the shipped image bakes /opt/loop; the in-session dev proxy is EVAL-ONLY — it loads the
+# frozen base + the candidate's byte-capped adapter via build_adapted_model and reports the RAW
+# adaptation gain (base_ce - candidate_ce) on the PUBLIC dev corpus as a best-of-k ranking signal (NO
+# held-out corpus, NO strong_baseline_ce, NO calibrated anchor baked; the grade's whole-FS stash
+# sweep is NOT reproduced in the loop). At most 16 submissions, at least 1; the model decides when to
+# stop (min=1 so --finalize works any time). The graded score is the runner's fresh end-of-session
+# tests/ grade (gain normalised against the hidden strong_baseline_ce through the calibrated log curve).
+[loop]
+min_submissions = 1
+max_submissions = 16
+submit = "bash /opt/loop/submit.sh"

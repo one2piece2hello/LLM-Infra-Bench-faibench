@@ -1,0 +1,121 @@
+diff --git a/combine_attn_states.py b/combine_attn_states.py
+index c2f8516..97177e4 100644
+--- a/combine_attn_states.py
++++ b/combine_attn_states.py
+@@ -1,58 +1,15 @@
+-"""Combine partial attention outputs into the final attention result.
+-
+-Public entry point:
+-    ``combine_attn_states(partial_out, partial_lse) -> (out, lse)``
+-
+-A high-throughput inference server splits the attention over a long key/value
+-sequence into several independent chunks, attends within each chunk on its own, and
+-produces for every chunk a *partial* attention output together with the log-sum-exp
+-of that chunk's softmax scores (its log-domain normalizer). This routine recombines
+-those partial results into the single attention output that would have been obtained
+-by attending over the whole sequence at once.
+-
+-Contract
+---------
+-- ``partial_out``: shape ``(N, R, D)`` — ``N`` partial outputs, ``R`` independent
+-  rows (one per query token/head), ``D`` the head/feature dimension. dtype
+-  ``torch.float32``, ``torch.bfloat16`` or ``torch.float16``; CUDA tensor.
+-- ``partial_lse``: shape ``(N, R)`` — the matching log-sum-exp normalizer of each
+-  partial. Same dtype and device as ``partial_out``. A value of ``-inf`` marks a
+-  chunk that saw no keys (it contributes nothing to that row).
+-- No other arguments.
+-
+-Functionality, for each row ``r`` independently, combining the ``N`` partials::
+-
+-    m       = max_n partial_lse[n, r]                  # log-domain max (stability)
+-    w[n]    = exp(partial_lse[n, r] - m)               # per-chunk weight; -inf -> 0
+-    denom   = sum_n w[n]
+-    out[r]  = (sum_n w[n] * partial_out[n, r]) / denom # weighted average, float32
+-    lse[r]  = log(denom) + m                           # combined log-normalizer
+-
+-If every chunk of a row is ``-inf`` (the row saw no keys at all) the combined output
+-for that row is all-zeros and its ``lse`` is ``-inf``.
+-
+-Returns
+--------
+-``(out, lse)``: ``out`` shape ``(R, D)`` dtype of ``partial_out``; ``lse`` shape
+-``(R,)`` dtype of ``partial_lse``. The weighted average is accumulated in float32 for
+-stability; each row is combined independently, row order is preserved, and the result
+-does not depend on the order of the ``N`` chunks.
+-
+-Error contract
+---------------
+-- ``TypeError`` if ``partial_out`` or ``partial_lse`` is not a floating
+-  (float32/bfloat16/float16) ``torch.Tensor``, or their dtypes differ.
+-- ``ValueError`` if ``partial_out`` is not 3-D ``(N, R, D)``, ``partial_lse`` is not
+-  2-D ``(N, R)``, or their leading ``(N, R)`` shapes disagree.
+-
+-Note on allowed operations
+---------------------------
+-The combine must be built explicitly from elementwise/reduction operations; a vendor
+-attention-state combine primitive is out of scope. The current implementation is
+-correct but memory-bound: it forms the full ``(N, R, D)`` array of weighted partials
+-as an intermediate in global memory and makes several separate passes over the data
+-(max, exponentiate, weight, reduce, divide), moving far more bytes than the result
+-itself requires.
++"""REVIEWER-ONLY baseline2 (soundness probe) for merge-attn-states-combine.
++
++A CORRECT implementation that is mechanically DIFFERENT from the Triton oracle: it
++computes the combined log-normalizer with ``torch.logsumexp`` over the chunk axis and
++contracts the softmax-weighted partials with ``torch.einsum`` (no explicit max /
++manual denominator / materialized (N, R, D) product like the naive baseline, and no
++hand-written kernel like the oracle), then hands the whole core to ``torch.compile`` so
++the Inductor backend fuses it into a small number of generated kernels — a different
++codegen path from the oracle. Validation runs eagerly (so the TypeError / ValueError
++error-contract raises before any compiled region). It must earn a POSITIVE reward on
++its own merit; if the verifier could only reward the exact oracle code it would be
++oracle-overfit and must be fixed. Reviewer-only; NEVER baked into the image.
+ """
+ 
+ import torch
+@@ -78,29 +35,24 @@ def _validate(partial_out, partial_lse):
+     return partial_out.shape
+ 
+ 
+-def combine_attn_states(partial_out, partial_lse):
+-    """See module docstring for the full contract.
+-
+-    Naive multi-pass reference: build the (N, R, D) weighted-partial tensor and reduce
+-    it. Correct but memory-bound (materializes an N*R*D intermediate and round-trips
+-    it through global memory across several separate kernel launches).
+-    """
+-    _validate(partial_out, partial_lse)
++def _core(partial_out, partial_lse):
+     out_f = partial_out.to(torch.float32)                     # (N, R, D)
+     lse_f = partial_lse.to(torch.float32)                     # (N, R)
++    combined = torch.logsumexp(lse_f, dim=0)                  # (R,); all-empty row -> -inf
++    finite = torch.isfinite(combined)
++    safe_comb = torch.where(finite, combined, torch.zeros_like(combined))
++    w = torch.exp(lse_f - safe_comb.unsqueeze(0))            # (N, R) softmax weights; -inf chunk -> 0
++    out = torch.einsum("nr,nrd->rd", w, out_f)               # (R, D)
++    out = torch.where(finite.unsqueeze(-1), out, torch.zeros_like(out))
++    lse = torch.where(finite, combined, torch.full_like(combined, float("-inf")))
++    return out.to(partial_out.dtype), lse.to(partial_lse.dtype)
+ 
+-    m = lse_f.max(dim=0, keepdim=True).values                 # (1, R)
+-    m_safe = torch.where(torch.isfinite(m), m, torch.zeros_like(m))
+-    w = torch.exp(lse_f - m_safe)                             # (N, R); -inf chunk -> 0
+-    denom = w.sum(dim=0)                                      # (R,)
+ 
+-    weighted = w.unsqueeze(-1) * out_f                        # (N, R, D) big intermediate
+-    acc = weighted.sum(dim=0)                                 # (R, D)
++# Inductor-fused version of the logsumexp+einsum body (distinct from the hand-Triton oracle).
++_compiled_core = torch.compile(_core)
+ 
+-    finite = denom > 0                                        # rows that saw at least one key
+-    safe_denom = torch.where(finite, denom, torch.ones_like(denom))
+-    out = torch.where(finite.unsqueeze(-1), acc / safe_denom.unsqueeze(-1),
+-                      torch.zeros_like(acc))
+-    lse = torch.where(finite, torch.log(safe_denom) + m_safe.squeeze(0),
+-                      torch.full_like(denom, float("-inf")))
+-    return out.to(partial_out.dtype), lse.to(partial_lse.dtype)
++
++def combine_attn_states(partial_out, partial_lse):
++    """Compiled (Inductor-fused) logsumexp+einsum combine (reviewer baseline2)."""
++    _validate(partial_out, partial_lse)
++    return _compiled_core(partial_out, partial_lse)

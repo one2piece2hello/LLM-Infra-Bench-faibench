@@ -1,0 +1,85 @@
+{
+  "_comment": "FROZEN evaluation surface — reviewer-only, NEVER model-visible. Uploaded FRESH at scoring under /tests together with heldout_corpus.jsonl / heldout_queries.jsonl / heldout_qrels.json (2026-07-27: those three were removed from the image, where a root solver could read the relevance labels). compute_reward.py reads thresholds from here. | 2026-07-27: reward is the reward.md 性能类 envelope and ref_speedup is now the frozen authoring-time constant 1.4290238072817099 (see ref_speedup).",
+  "task_id": "e2e-g2-embed-compress-golf",
+  "schema": "e2e_manifest_v1",
+  "repo_baked": "UKPLab/sentence-transformers",
+  "source_commit_app_repo": "28e79467c49b5bedff9b1492950504af04d0b74b",
+  "compute_reward_sha256": "3c8a9806bba0adf8734a55f3489e7b232d087b70e95cd2ebafcbe6f583b0cfed",
+  "base_embedding_model_baked": "sentence-transformers/all-MiniLM-L6-v2 (384-dim; downloaded at Docker build via proxy, frozen under /opt/models)",
+  "heldout_data_provenance": "WikiText-103（构建期经代理下载，离线切分）。语料 = 段落正文，留出查询 = 从源段落摘出的最长句，其源段落是唯一 gold（rel=1）。⚠️ 2026-07-26 反捷径修复：**每一个**段落（不只是被查询的那些）都摘掉了它最长的那句，只把剩余正文写进语料 —— 所以 gold 文档不再逐字包含 query（构建期自证 leakage=0/N，见镜像构建日志），一个「子串/精确短语匹配」打分器拿不到分；同时因为全语料一致地摘句，也没有「gold 段落系统性更短」的长度捷径。agent 可见的 dev split（/data）与留出 TEST split 段落池互斥。",
+  "thresholds": {
+    "max_bytes_per_vector": 64,
+    "ndcg_k": 10,
+    "refine_shortlist_n": 50,
+    "quality_floor_ndcg": 0.08,
+    "min_plausible_ndcg": 0.02,
+    "strong_baseline_ndcg": 0.459151,
+    "embedding_variance_floor": 1e-09,
+    "min_distinct_fraction": 0.8,
+    "max_encode_batch": 256,
+    "refine_max_calls": 6000,
+    "probe_seed": 20240725,
+    "max_corpus_docs": 60000,
+    "max_query_count": 6000,
+    "encode_timeout_sec": 1800,
+    "ref_speedup": 1.4290238072817099
+  },
+  "calibration_pending": false,
+  "calibration_evidence": {
+    "measured_by": "authoring CPU lane",
+    "n_repeats": 5,
+    "raw_values": [
+      0.459151,
+      0.459151,
+      0.459151,
+      0.459151,
+      0.459151
+    ],
+    "median": 0.459151,
+    "sigma": 0.0,
+    "note": "strong_baseline_ndcg = 强基线参考解在 held-out 上 5 次重复的中位数（eval-only，确定性）"
+  },
+  "reward_model": "reward_md_log_speedup_v2_oracle_zero",
+  "reward_formula": "reward = min(1.0, ln(ratio/ref_speedup)/ln(ref_speedup)) if ratio > ref_speedup else 0.0; range [0,1]; ratio = candidate_ndcg / strong_baseline_ndcg",
+  "ref_speedup": {
+    "value": 1.4290238072817099,
+    "status": "FROZEN_AUTHORING_TIME_CONSTANT",
+    "set_on": "2026-07-27",
+    "provenance": "authoring-time CPU-lane measurement of the best IN-BUDGET variant (32 dims x float16 = 64 B/vector, full-precision shortlist refiner): nDCG@10 = 0.6561377101372043 against strong_baseline_ndcg = 0.459151 -> ratio = 1.4290238072817099. The same session measured the strong-baseline anchor 5/5 identical (sigma = 0). The oracle is NEVER run at scoring time — this is a read-only constant.",
+    "metric_kind_caveat": "reward.md 性能类 公式定义在 wall-clock speedup 上；本题不计时，喂进 ln() 的是 64 B/向量 预算下的 nDCG@10 质量比。2026-07-27 owner 裁定：**保留有界 log 公式，不改判二值** —— 天花板 1.429 远高于 1.15 下限、σ=0、条件良好，而二值化会毁掉真实梯度（naive 0.319→0.0 / 基线 1.0000011→1.5e-06 / oracle 1.42902→0.5 / 封顶还差 2× ratio）。修的是**命名不是 reward**：`speedup`/`ref_speedup` 保留 reward.md 的字段名以兼容下游校验，另外**新增** metric_kind=\"quality_ratio\"、metric_name=\"ndcg@10\"、metric_direction=\"higher_is_better\"、timing_measured=false，杜绝把 1.429 读成时延比。",
+    "conditioning": "ln(1.4290238072817099) = 0.3570047 -> reward 0.5 exactly at the demonstrated in-budget ceiling (nDCG@10 = 0.6561377); reward caps at 1.0 only at ratio 1.42902^2 = 2.042109 (nDCG@10 = 0.937637), which is above the out-of-budget 384-d fp32 ruler (0.6918612) and therefore unreachable; the strong baseline (ratio 1.0) scores 0.",
+    "reference_implementation": "task/solution/submission_encoder_ceiling_ref.py — re-archived 2026-07-27 with the same fingerprint (PCA-32 + float16 = 64 B/vec + full-precision shortlist refiner) so the constant can be re-measured; reviewer-only, never in the image.",
+    "measured_ratios_for_reference": {
+      "naive_packbits_template": 0.31936,
+      "strong_baseline_anchor": 1.0,
+      "in_budget_ceiling": 1.4290238,
+      "out_of_budget_fp32_ruler_HARD_REJECTED_BY_BUDGET_GATE": 1.50683
+    },
+    "hardware_caveat": "此 ref_speedup=1.4290238072817099 与 thresholds.strong_baseline_ndcg=0.459151 在作者的 CPU 通道(Intel Sapphire Rapids)上标定。本题主指标是检索质量(nDCG@10)而非墙钟时间,只要语料可复现就与硬件无关 —— build 时会断言重生成的 heldout_* 与题包 tests/ 逐字节一致。若你改了语料、底座嵌入模型(/opt/models/all-MiniLM-L6-v2)或字节预算,请按 recalibrate_howto 重标。",
+    "recalibrate_howto": {
+      "step1": "docker run --rm -v \"$PWD/tests:/tests:ro\" -e VERIFIER_MODE=<模式名> fai/e2e-g2-embed-compress-golf:oss bash /tests/test.sh",
+      "step2": "从 /logs/verifier/benchmark_results.json 读 ndcg / gain(建议 >=3 次取中位数)",
+      "step3": "写回 ref_speedup.value 与 thresholds.strong_baseline_ndcg",
+      "guard": "ref_speedup <= 1 或缺失 => 设计上 HARD FAIL 0",
+      "answer_key_warning": "tests/heldout_qrels.json 就是相关性答案key:它随题包开源、但绝不能烤进镜像(否则可造 64 字节签名编码器把 gold 钉在 top-1)"
+    }
+  },
+  "heldout_assets": {
+    "location": "uploaded fresh with tests/ to /tests (NOT baked into the image any more)",
+    "files": [
+      "heldout_corpus.jsonl",
+      "heldout_queries.jsonl",
+      "heldout_qrels.json"
+    ],
+    "counts": {
+      "corpus_docs": 8000,
+      "queries": 1500
+    },
+    "sha256": {
+      "heldout_corpus.jsonl": "ef18e24bebd157818e3cffed2bfb84f69af84091e0f65b43e84113cc9e88db39",
+      "heldout_queries.jsonl": "55e884dd2a32854e35e95a8288689a5e47bbeefdb064df083082a27dbab97e63",
+      "heldout_qrels.json": "7c397bd6a22aaa7b4f950757880119a17906c9d7545ca5eaca6dd5e56d5810ca"
+    },
+    "provenance": "extracted byte-for-byte from the pushed image e2e-g2-embed-compress-golf-val:v0@sha256:6a2321f8aae9c5d66453198d0cdcd051c74ff6a8a80621e30c9a95939bc6ff78 layer sha256:e8e44901202f19703414346ac7afac78bf0c4a846d3592f156666a48c7a1346c (/opt/verifier/) — i.e. EXACTLY the split strong_baseline_ndcg=0.459151 and ref_speedup=1.4290238072817099 were calibrated on. Do not regenerate."
+  }
+}

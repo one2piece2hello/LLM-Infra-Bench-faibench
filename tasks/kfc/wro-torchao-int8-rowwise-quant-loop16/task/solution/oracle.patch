@@ -1,0 +1,47 @@
+--- a/torchao/prototype/quantized_training/int8.py
++++ b/torchao/prototype/quantized_training/int8.py
+@@ -36,30 +36,20 @@
+     done here.
+     3. Apply scale: AQT uses `input * (1 / scale)`, while this function performs `input / scale`.
+     """
+-    # -----------------------------------------------------------------------
+-    # SLOW-BUT-CORRECT rowwise int8 quantization: quantize ONE row at a time in
+-    # a Python loop over the leading dimension, instead of a single fused
+-    # vectorized pass. Behaviorally identical (per-row absmax scale
+-    # = |row|.amax()/127, then round(row/scale) clipped to [-128,127] as int8),
+-    # but pays per-row Python / launch overhead that grows with the number of
+-    # rows. Making this a single fused vectorized quantization is the task.
+-    # WRO_INT8_ROWWISE_LOOP
+-    # -----------------------------------------------------------------------
+-    R = tensor.shape[0]
+-    scale = tensor.new_empty(R)  # same dtype as tensor
+-    out = torch.empty_like(tensor, dtype=torch.int8)
+-    for i in range(R):
+-        row = tensor[i]
+-        s = row.abs().amax() / 127
+-        scale[i] = s
+-        inv = 1.0 / s.float().clip(eps)
+-        q = row.float() * inv
+-        if stochastic_rounding:
+-            q = (q + torch.rand_like(q)).floor()
+-        else:
+-            q = q.round()
+-        out[i] = q.clip(-128, 127).to(torch.int8)
+-    return out, scale
++    # absmax symmetric quantization
++    scale = tensor.abs().amax(1) / 127  # same dtype as tensor
++    inv_scale = 1.0 / scale.float().clip(eps)
++    tensor = tensor.float() * inv_scale.view(
++        -1, 1
++    )  # slightly faster than divide directly
++
++    if stochastic_rounding:
++        tensor = (tensor + torch.rand_like(tensor)).floor()
++    else:
++        tensor = tensor.round()
++
++    tensor = tensor.clip(-128, 127).to(torch.int8)
++    return tensor, scale
+ 
+ 
+ class Int8QuantizedTrainingLinearWeight(TorchAOBaseTensor):

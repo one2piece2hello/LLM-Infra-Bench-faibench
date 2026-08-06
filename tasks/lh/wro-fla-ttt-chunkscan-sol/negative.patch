@@ -1,0 +1,14 @@
+--- a/fla/ops/ttt/chunk.py
++++ b/fla/ops/ttt/chunk.py
+@@ -48,8 +48,9 @@
+ 
+         Attn = torch.tril(q_i @ k_i.transpose(-2, -1))
+         o_i = q_i @ h - (eta_i * Attn) @ v_new + hb - torch.tril(eta_i.expand_as(Attn)) @ v_new
+-        h = h - (eta_i[:, :, -1, :, None] * k_i).transpose(-1, -2) @ v_new
+-        hb = hb - torch.sum(eta_i[:, :, -1, :, None] * v_new, dim=-2, keepdim=True)
++        # NEGATIVE known-bad: skip the test-time inner-loop state update (h, hb frozen).
++        h = h
++        hb = hb
+ 
+         mean = o_i.mean(dim=-1, keepdim=True)
+         var = o_i.var(dim=-1, unbiased=False, keepdim=True).to(torch.float32)

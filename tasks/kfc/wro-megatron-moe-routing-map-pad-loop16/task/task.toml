@@ -1,0 +1,50 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wro-megatron-moe-routing-map-pad-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "You are given a working implementation of a Mixture-of-Experts routing-map padding utility."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wro-megatron-moe-routing-map-pad-loop16:v1@sha256:2bf6c2ad2dafee0f4ded74bacc716619dc454ed811d15304360dc54d21b7bea9
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wro-megatron-moe-routing-map-pad-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wro-megatron-moe-routing-map-pad-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "acceleration"
+contract_pattern = "acceleration"
+primary_edit_paths = ["megatron/core/transformer/moe/moe_utils.py"]
+forbidden_edit_paths = ["*"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+ref_speedup = 479.507333
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+# Exactly ONE graded submission: submitting ends the task; a second submit.sh call
+# is refused. NOTE: the /opt/loop harness baked into the image applies its own 3/16
+# in-session budget; for in-session loop scoring the image is authoritative.
+[loop]
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"

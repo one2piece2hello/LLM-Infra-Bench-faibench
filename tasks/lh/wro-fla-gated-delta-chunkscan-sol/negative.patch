@@ -1,0 +1,11 @@
+--- a/fla/ops/gated_delta_rule/chunk.py
++++ b/fla/ops/gated_delta_rule/chunk.py
+@@ -84,7 +84,7 @@
+         h = h * torch.exp(g_ls[:, t])[..., None, None]
+         u = vf[:, t] - (h * kf[:, t][..., None]).sum(-2)
+         u = u * bf[:, t][..., None]
+-        h = h + kf[:, t][..., None] * u[..., None, :]
++        # NEGATIVE known-bad: drop the recurrent state-carry update (memoryless readout).
+         o[:, t] = (h * qf[:, t][..., None]).sum(-2)
+     final_state = h if output_final_state else None
+     A = q.new_zeros(1)  # third tuple element is not consumed by the forward path

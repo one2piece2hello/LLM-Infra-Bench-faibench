@@ -1,0 +1,11 @@
+{
+  "task_id": "wro-nccl-ib-multisend-wr-plan",
+  "perf_metric": "speedup",
+  "ref_speedup": 4.909378,
+  "oracle_candidate_ms": 64.041,
+  "baseline_ms": 314.4015,
+  "noop_speedup": 1.008922,
+  "baseline2_speedup": 1.899146,
+  "anchor_source": "4-mode validation run on the authoring CPU lane (Intel Sapphire Rapids)",
+  "notes": "ref_speedup is the oracle anchor measured on the authoring lane, not a locally re-measured number."
+}

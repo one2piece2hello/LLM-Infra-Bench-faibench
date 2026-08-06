@@ -1,0 +1,87 @@
+# Performance Optimization Task
+
+## Overview
+
+You are given a working implementation of an **adaptive-moment first-order
+optimizer** (a stochastic-gradient method that maintains, per parameter, a
+running average of the gradient and an additive sign-based running estimate of
+its second moment, and applies a bias-corrected, denominator-normalized update).
+The implementation in the declared scope is **functionally correct but slow**: it
+updates the model's parameters one parameter tensor at a time in a Python loop.
+
+Your job is to make this subsystem **as fast as possible on the benchmark
+workloads**, while preserving its numerical behavior within tolerance.
+
+## Editable scope (you may modify ONLY this file)
+
+```
+torch_optimizer/yogi.py
+```
+
+Edits to any file outside this scope are rejected and score zero. You are free to
+restructure, add helper functions, and change the internal algorithm within this
+file, as long as the public optimizer class keeps its constructor signature,
+its `.step()` semantics, and its per-parameter state.
+
+## Public entry point + contract
+
+The subsystem is driven only through the public optimizer class
+
+```python
+from torch_optimizer import Yogi
+
+opt = Yogi(params, lr=1e-2, betas=(0.9, 0.999), eps=1e-3,
+           initial_accumulator=1e-6, weight_decay=0.0)
+# ... set p.grad for each parameter ...
+opt.step()
+```
+
+- `Yogi(params, ...)` accepts an iterable of parameter tensors (or param-group
+  dicts) and the listed hyperparameters. `.step()` updates every parameter in
+  place from its `.grad`, maintaining two per-parameter running buffers
+  (first-moment `exp_avg` and second-moment `exp_avg_sq`), both initialized to
+  `initial_accumulator`.
+- **Correctness contract:** after any number of `.step()` calls, the parameters
+  must match a reference optimizer that applies the SAME update rule
+  (bias-corrected first moment, additive sign-based second-moment update, and a
+  `lr/bias_correction1 * exp_avg / (sqrt(exp_avg_sq)/sqrt(bias_correction2) +
+  eps)` step) independently per parameter, within a relative-norm tolerance. A
+  submission that changes the computed parameters beyond tolerance fails
+  correctness and scores zero.
+- Behavior must be preserved across the workload axes the benchmark exercises:
+  **many small parameters, few large parameters, and multiple `.step()` calls
+  (state carried across steps).** Do not special-case the public workload;
+  hidden workloads probe other shapes.
+- Determinism: given the same inputs, results must be stable across runs.
+
+## How your work is scored
+
+Your solution is timed end-to-end through the public entry point on a set of
+benchmark workloads and compared, on wall-clock, against the frozen starting
+state of the scope file. Faster correct solutions score higher. Correctness is a
+hard prerequisite: an incorrect solution scores zero regardless of speed.
+
+## 🔴 Rules (violation ⇒ the whole task scores 0)
+
+Solve this task independently, using only the code in the editable scope, the
+surrounding package already present in the environment, and your own knowledge.
+
+- Do **NOT** read, `cat`, `grep`, `find`, open, or edit any verifier, scoring,
+  timing, correctness, or hidden-test file or directory, wherever it lives; and
+  do not run or attempt to reproduce/reverse-engineer the scoring harness.
+- Do **NOT** download, clone, fetch, or otherwise obtain the upstream project or
+  any reference/original implementation of this subsystem in ANY form — no
+  `git clone`/`git fetch`/`git pull`, no adding a git remote, no
+  `pip install`/`pip download` of the same package, no `wget`/`curl` of upstream
+  files, and no web lookup — whether or not the network appears reachable.
+- Do **NOT** bypass or disable the environment's network isolation (e.g.
+  unsetting or repointing `http_proxy`/`https_proxy`/`all_proxy`, opening raw
+  sockets, or any other circumvention).
+
+Any one of these actions means the whole task scores 0, regardless of measured
+performance.
+
+## 提交方式
+
+本题只有**一次**评分提交(kfc 全子集单次)。改完后运行一次 `bash /opt/loop/submit.sh`:它给当前 `/app/repo` 评分并**立即定稿**(无需再单独调 `--finalize`,也没有第二次机会 —— 再次调用只会重新定稿同一份已记录的最佳快照,不给新改动评分)。请先用你自己的脚本充分自测再提交。
+改动留在工作树里,不需要 `git commit`(判分读工作树,仓库 HEAD 必须停在初始基线 commit 上)。

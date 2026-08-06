@@ -1,0 +1,105 @@
+diff --git a/combine_attn_states.py b/combine_attn_states.py
+index c2f8516..3b1fb22 100644
+--- a/combine_attn_states.py
++++ b/combine_attn_states.py
+@@ -1,58 +1,12 @@
+-"""Combine partial attention outputs into the final attention result.
+-
+-Public entry point:
+-    ``combine_attn_states(partial_out, partial_lse) -> (out, lse)``
+-
+-A high-throughput inference server splits the attention over a long key/value
+-sequence into several independent chunks, attends within each chunk on its own, and
+-produces for every chunk a *partial* attention output together with the log-sum-exp
+-of that chunk's softmax scores (its log-domain normalizer). This routine recombines
+-those partial results into the single attention output that would have been obtained
+-by attending over the whole sequence at once.
+-
+-Contract
+---------
+-- ``partial_out``: shape ``(N, R, D)`` — ``N`` partial outputs, ``R`` independent
+-  rows (one per query token/head), ``D`` the head/feature dimension. dtype
+-  ``torch.float32``, ``torch.bfloat16`` or ``torch.float16``; CUDA tensor.
+-- ``partial_lse``: shape ``(N, R)`` — the matching log-sum-exp normalizer of each
+-  partial. Same dtype and device as ``partial_out``. A value of ``-inf`` marks a
+-  chunk that saw no keys (it contributes nothing to that row).
+-- No other arguments.
+-
+-Functionality, for each row ``r`` independently, combining the ``N`` partials::
+-
+-    m       = max_n partial_lse[n, r]                  # log-domain max (stability)
+-    w[n]    = exp(partial_lse[n, r] - m)               # per-chunk weight; -inf -> 0
+-    denom   = sum_n w[n]
+-    out[r]  = (sum_n w[n] * partial_out[n, r]) / denom # weighted average, float32
+-    lse[r]  = log(denom) + m                           # combined log-normalizer
+-
+-If every chunk of a row is ``-inf`` (the row saw no keys at all) the combined output
+-for that row is all-zeros and its ``lse`` is ``-inf``.
+-
+-Returns
+--------
+-``(out, lse)``: ``out`` shape ``(R, D)`` dtype of ``partial_out``; ``lse`` shape
+-``(R,)`` dtype of ``partial_lse``. The weighted average is accumulated in float32 for
+-stability; each row is combined independently, row order is preserved, and the result
+-does not depend on the order of the ``N`` chunks.
+-
+-Error contract
+---------------
+-- ``TypeError`` if ``partial_out`` or ``partial_lse`` is not a floating
+-  (float32/bfloat16/float16) ``torch.Tensor``, or their dtypes differ.
+-- ``ValueError`` if ``partial_out`` is not 3-D ``(N, R, D)``, ``partial_lse`` is not
+-  2-D ``(N, R)``, or their leading ``(N, R)`` shapes disagree.
+-
+-Note on allowed operations
+---------------------------
+-The combine must be built explicitly from elementwise/reduction operations; a vendor
+-attention-state combine primitive is out of scope. The current implementation is
+-correct but memory-bound: it forms the full ``(N, R, D)`` array of weighted partials
+-as an intermediate in global memory and makes several separate passes over the data
+-(max, exponentiate, weight, reduce, divide), moving far more bytes than the result
+-itself requires.
++"""REVIEWER-ONLY negative control (known-bad) for merge-attn-states-combine.
++MUST score reward 0.
++
++Bug: it IGNORES the log-sum-exp weighting entirely and combines the chunks with a
++plain unweighted mean (and reports the max of the per-chunk normalizers instead of
++their log-sum-exp). Because the chunks carry genuinely different log-normalizers,
++the unweighted mean is out of tolerance on the very first parity case, failing the
++hidden correctness suite (named hard_fail ``hidden_correctness_failed``). This is the
++SPEC known-bad "ignore the lse weighting -> wrong combine". Reviewer-only; never baked.
+ """
+ 
+ import torch
+@@ -79,28 +33,8 @@ def _validate(partial_out, partial_lse):
+ 
+ 
+ def combine_attn_states(partial_out, partial_lse):
+-    """See module docstring for the full contract.
+-
+-    Naive multi-pass reference: build the (N, R, D) weighted-partial tensor and reduce
+-    it. Correct but memory-bound (materializes an N*R*D intermediate and round-trips
+-    it through global memory across several separate kernel launches).
+-    """
+     _validate(partial_out, partial_lse)
+-    out_f = partial_out.to(torch.float32)                     # (N, R, D)
+-    lse_f = partial_lse.to(torch.float32)                     # (N, R)
+-
+-    m = lse_f.max(dim=0, keepdim=True).values                 # (1, R)
+-    m_safe = torch.where(torch.isfinite(m), m, torch.zeros_like(m))
+-    w = torch.exp(lse_f - m_safe)                             # (N, R); -inf chunk -> 0
+-    denom = w.sum(dim=0)                                      # (R,)
+-
+-    weighted = w.unsqueeze(-1) * out_f                        # (N, R, D) big intermediate
+-    acc = weighted.sum(dim=0)                                 # (R, D)
+-
+-    finite = denom > 0                                        # rows that saw at least one key
+-    safe_denom = torch.where(finite, denom, torch.ones_like(denom))
+-    out = torch.where(finite.unsqueeze(-1), acc / safe_denom.unsqueeze(-1),
+-                      torch.zeros_like(acc))
+-    lse = torch.where(finite, torch.log(safe_denom) + m_safe.squeeze(0),
+-                      torch.full_like(denom, float("-inf")))
+-    return out.to(partial_out.dtype), lse.to(partial_lse.dtype)
++    # KNOWN-BAD: drops the log-sum-exp weighting and averages the chunks uniformly.
++    out = partial_out.to(torch.float32).mean(dim=0).to(partial_out.dtype)
++    lse = partial_lse.to(torch.float32).max(dim=0).values.to(partial_lse.dtype)
++    return out, lse

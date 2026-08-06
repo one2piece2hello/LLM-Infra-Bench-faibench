@@ -1,0 +1,35 @@
+diff --git a/flash_attn/cute/interface.py b/flash_attn/cute/interface.py
+index e931d5b..ee501ea 100644
+--- a/flash_attn/cute/interface.py
++++ b/flash_attn/cute/interface.py
+@@ -2303,7 +2303,29 @@ def flash_attn_func(
+     block_sparse_tensors_bwd: Optional[BlockSparseTensorsTorch] = None,
+     return_lse: bool = False,
+ ):
+-    return _wro_eager_blocksparse_attn(q, k, v, softmax_scale, block_sparse_tensors, return_lse)
++    return FlashAttnFunc.apply(
++        q,
++        k,
++        v,
++        qv,
++        gather_kv_indices,
++        softmax_scale,
++        causal,
++        window_size,
++        learnable_sink,
++        softcap,
++        num_splits,
++        pack_gqa,
++        deterministic,
++        score_mod,
++        score_mod_bwd,
++        mask_mod,
++        aux_tensors,
++        aux_scalars,
++        None,
++        block_sparse_tensors_bwd,
++        return_lse,
++    )
+ 
+ 
+ def flash_attn_varlen_func(

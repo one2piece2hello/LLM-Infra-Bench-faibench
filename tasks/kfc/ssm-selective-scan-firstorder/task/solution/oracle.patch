@@ -1,0 +1,235 @@
+diff --git a/state_space_scan.py b/state_space_scan.py
+index caaa034..0ee059c 100644
+--- a/state_space_scan.py
++++ b/state_space_scan.py
+@@ -45,17 +45,37 @@ Error contract
+ - ``ValueError`` if the ranks are wrong (``x`` not 3-D, ``A`` not 4-D, ``B``/``C``
+   not 3-D) or the shared dimensions ``(B, L, D, N)`` are inconsistent across inputs.
+ 
+-Note on allowed operations
+---------------------------
+-Library sequence-scan primitives that would perform the whole recurrence in one call
+-are out of scope — the scan is built explicitly. The current implementation walks the
+-time axis in a plain Python ``for`` loop, one timestep per iteration, so it issues
+-O(L) dependent kernel launches and serializes on the time dimension. It is correct
+-but leaves the sequence-level parallelism of the recurrence on the table.
++Implementation notes
++--------------------
++The recurrence is evaluated with a chunked ("blocked") scan built from primitive
++ops in custom Triton kernels — no library scan primitive is used:
++
++1. Kernel 1 (parallel over batch x channel-block x time-chunk): marches one chunk
++   of ``CL`` timesteps with the running state held in registers, emitting the
++   per-chunk transition product ``P_g = prod A`` and the zero-init local end
++   state ``H_g``.
++2. Kernel 2 (sequential over the ``G = ceil(L / CL)`` chunks only): combines the
++   chunk summaries into the true state at each chunk boundary,
++   ``S_{g+1} = P_g * S_g + H_g``.
++3. Kernel 3 (parallel like kernel 1): re-marches each chunk, reconstructing
++   ``h[t] = (cum A up to t) * S_g + h_local[t]`` exactly as the unrolled
++   recurrence dictates, and writes ``y[t] = sum_n C[t, n] * h[t]``.
++
++This keeps the strict causal state-transition order of the math while replacing
++O(L) dependent kernel launches with O(1) launches and exposing parallelism along
++batch, channels, and time chunks.
+ """
+ 
+ import torch
+ 
++try:
++    import triton
++    import triton.language as tl
++
++    _HAS_TRITON = True
++except Exception:  # pragma: no cover - triton always present on the target image
++    _HAS_TRITON = False
++
+ 
+ def _validate(A, B, C, x):
+     for name, t in (("A", A), ("B", B), ("C", C), ("x", x)):
+@@ -84,26 +104,171 @@ def _validate(A, B, C, x):
+     return Bsz, L, D, N
+ 
+ 
+-def state_space_scan(A, B, C, x):
+-    """See module docstring for the full contract.
++if _HAS_TRITON:
+ 
+-    Naive sequential reference: march the time axis one step at a time in a Python
+-    loop, accumulating the (D, N) hidden state in float32. Correct but latency-bound
+-    on the sequential time dependency (O(L) dependent steps / kernel launches).
+-    """
+-    Bsz, L, D, N = _validate(A, B, C, x)
+-    out_dtype = x.dtype
++    @triton.jit
++    def _chunk_summary_kernel(
++        a_ptr, x_ptr, b_ptr, p_ptr, h_ptr,
++        L, D, N, G,
++        CL: tl.constexpr, BD: tl.constexpr, BN: tl.constexpr,
++    ):
++        pid = tl.program_id(0)
++        num_db = tl.cdiv(D, BD)
++        b = pid // (G * num_db)
++        rem = pid % (G * num_db)
++        g = rem // num_db
++        db = rem % num_db
++
++        d = db * BD + tl.arange(0, BD)
++        n = tl.arange(0, BN)
++        dm = d < D
++        nm = n < N
++        mn = dm[:, None] & nm[None, :]
++
++        t0 = g * CL
++        a_base = a_ptr + b * L * D * N + d[:, None] * N + n[None, :]
++        x_base = x_ptr + b * L * D + d
++        b_base = b_ptr + b * L * N + n
++
++        p = tl.full((BD, BN), 1.0, tl.float32)
++        h = tl.zeros((BD, BN), tl.float32)
++        for i in range(CL):
++            t = t0 + i
++            tm = t < L
++            a = tl.load(a_base + t * D * N, mask=tm & mn, other=1.0).to(tl.float32)
++            xv = tl.load(x_base + t * D, mask=tm & dm, other=0.0).to(tl.float32)
++            bv = tl.load(b_base + t * N, mask=tm & nm, other=0.0).to(tl.float32)
++            p = p * a
++            h = a * h + xv[:, None] * bv[None, :]
++
++        out_off = b * G * D * N + g * D * N + d[:, None] * N + n[None, :]
++        tl.store(p_ptr + out_off, p, mask=mn)
++        tl.store(h_ptr + out_off, h, mask=mn)
++
++    @triton.jit
++    def _chunk_carry_kernel(
++        p_ptr, h_ptr, s_ptr,
++        D, N, G,
++        BD: tl.constexpr, BN: tl.constexpr,
++    ):
++        pid = tl.program_id(0)
++        num_db = tl.cdiv(D, BD)
++        b = pid // num_db
++        db = pid % num_db
++
++        d = db * BD + tl.arange(0, BD)
++        n = tl.arange(0, BN)
++        mn = (d < D)[:, None] & (n < N)[None, :]
++
++        base = b * G * D * N + d[:, None] * N + n[None, :]
++        carry = tl.zeros((BD, BN), tl.float32)
++        for g in range(G):
++            off = base + g * D * N
++            p = tl.load(p_ptr + off, mask=mn, other=1.0)
++            h = tl.load(h_ptr + off, mask=mn, other=0.0)
++            carry = p * carry + h
++            tl.store(s_ptr + off, carry, mask=mn)
++
++    @triton.jit
++    def _chunk_output_kernel(
++        a_ptr, x_ptr, b_ptr, c_ptr, s_ptr, y_ptr,
++        L, D, N, G,
++        CL: tl.constexpr, BD: tl.constexpr, BN: tl.constexpr,
++    ):
++        pid = tl.program_id(0)
++        num_db = tl.cdiv(D, BD)
++        b = pid // (G * num_db)
++        rem = pid % (G * num_db)
++        g = rem // num_db
++        db = rem % num_db
++
++        d = db * BD + tl.arange(0, BD)
++        n = tl.arange(0, BN)
++        dm = d < D
++        nm = n < N
++        mn = dm[:, None] & nm[None, :]
++
++        t0 = g * CL
++        a_base = a_ptr + b * L * D * N + d[:, None] * N + n[None, :]
++        x_base = x_ptr + b * L * D + d
++        b_base = b_ptr + b * L * N + n
++        c_base = c_ptr + b * L * N + n
++        y_base = y_ptr + b * L * D + d
++
++        h_start = tl.load(
++            s_ptr + (b * G + g - 1) * D * N + d[:, None] * N + n[None, :],
++            mask=mn & (g > 0), other=0.0,
++        )
++        cum_a = tl.full((BD, BN), 1.0, tl.float32)
++        h_loc = tl.zeros((BD, BN), tl.float32)
++        for i in range(CL):
++            t = t0 + i
++            tm = t < L
++            a = tl.load(a_base + t * D * N, mask=tm & mn, other=1.0).to(tl.float32)
++            xv = tl.load(x_base + t * D, mask=tm & dm, other=0.0).to(tl.float32)
++            bv = tl.load(b_base + t * N, mask=tm & nm, other=0.0).to(tl.float32)
++            cv = tl.load(c_base + t * N, mask=tm & nm, other=0.0).to(tl.float32)
++            cum_a = cum_a * a
++            h_loc = a * h_loc + xv[:, None] * bv[None, :]
++            h_full = cum_a * h_start + h_loc
++            yt = tl.sum(cv[None, :] * h_full, axis=1)
++            tl.store(y_base + t * D, yt.to(y_ptr.dtype.element_ty), mask=tm & dm)
++
++
++def _next_pow2(v):
++    return 1 << (max(int(v), 1) - 1).bit_length()
++
++
++def _torch_sequential(A, B, C, x, out_dtype):
++    """Plain sequential fallback (CPU tensors or no Triton available)."""
++    Bsz, L, D, N = A.shape[0], A.shape[1], A.shape[2], A.shape[3]
+     Af = A.to(torch.float32)
+     Bf = B.to(torch.float32)
+     Cf = C.to(torch.float32)
+     xf = x.to(torch.float32)
+-
+-    bx = xf.unsqueeze(-1) * Bf.unsqueeze(2)          # (B, L, D, N) input drive
++    bx = xf.unsqueeze(-1) * Bf.unsqueeze(2)
+     h = torch.zeros(Bsz, D, N, dtype=torch.float32, device=A.device)
+     hs = []
+-    for t in range(L):                               # sequential O(L) time loop
+-        h = Af[:, t] * h + bx[:, t]                  # (B, D, N)
++    for t in range(L):
++        h = Af[:, t] * h + bx[:, t]
+         hs.append(h)
+-    hs = torch.stack(hs, dim=1)                      # (B, L, D, N)
+-    y = (hs * Cf.unsqueeze(2)).sum(dim=-1)           # (B, L, D) read-out through C
++    hs = torch.stack(hs, dim=1)
++    y = (hs * Cf.unsqueeze(2)).sum(dim=-1)
+     return y.to(out_dtype)
++
++
++def state_space_scan(A, B, C, x):
++    """See module docstring for the full contract."""
++    Bsz, L, D, N = _validate(A, B, C, x)
++    out_dtype = x.dtype
++    if L == 0:
++        return torch.empty((Bsz, 0, D), dtype=out_dtype, device=x.device)
++    if not (_HAS_TRITON and A.is_cuda):
++        return _torch_sequential(A, B, C, x, out_dtype)
++
++    A = A.contiguous()
++    B = B.contiguous()
++    C = C.contiguous()
++    x = x.contiguous()
++
++    CL = 64
++    G = (L + CL - 1) // CL
++    BN = _next_pow2(N)
++    BD = max(1, min(_next_pow2(D), 1024 // BN, 64))
++    num_warps = 2
++
++    P = torch.empty((Bsz, G, D, N), dtype=torch.float32, device=A.device)
++    H = torch.empty((Bsz, G, D, N), dtype=torch.float32, device=A.device)
++    S = torch.empty((Bsz, G, D, N), dtype=torch.float32, device=A.device)
++    y = torch.empty((Bsz, L, D), dtype=out_dtype, device=A.device)
++
++    num_db = (D + BD - 1) // BD
++    grid = (Bsz * G * num_db,)
++    _chunk_summary_kernel[grid](A, x, B, P, H, L, D, N, G, CL=CL, BD=BD, BN=BN,
++                                num_warps=num_warps)
++    if G > 1:
++        _chunk_carry_kernel[(Bsz * num_db,)](P, H, S, D, N, G, BD=BD, BN=BN,
++                                             num_warps=num_warps)
++    _chunk_output_kernel[grid](A, x, B, C, S, y, L, D, N, G, CL=CL, BD=BD, BN=BN,
++                               num_warps=num_warps)
++    return y

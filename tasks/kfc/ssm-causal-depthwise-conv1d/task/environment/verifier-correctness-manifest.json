@@ -1,0 +1,31 @@
+{
+  "schema_version": "kernelbench_correctness_manifest_v1",
+  "task_id": "ssm-causal-depthwise-conv1d",
+  "task_kind": "acceleration",
+  "expected_case_count": 12,
+  "primary_workload": "channel-window-op-geomean-4shapes",
+  "ref_speedup": 2.0,
+  "ref_speedup_note": "Anchor 18.5413 calibrated in oracle mode on NVIDIA H20. tests/ref_speedup.txt is authoritative at scoring; this file is only the in-image fallback. See tests/ref_speedup.caveat.md to re-measure on your hardware.",
+  "metric": "wall_time_ms",
+  "direction": "higher_is_better",
+  "target_hardware": "H20",
+  "value_axis": "wall_time_latency (launch + global-memory bytes moved; the fused single-pass avoids the padded-copy allocation, the K per-tap full-tensor round-trips, and the separate activation pass)",
+  "correctness_axes": [
+    "normal_bf16",
+    "normal_fp32",
+    "causality",
+    "left_pad_boundary",
+    "pointwise_K1",
+    "channel_independence",
+    "bias_and_activation",
+    "long_L_fp16",
+    "degenerate_L1_C1",
+    "error",
+    "metamorphic_shift",
+    "work_evidence_impulse"
+  ],
+  "public_symbol": "channel_window_op",
+  "primary_edit_paths": [
+    "/app/repo/channel_window_op.py"
+  ]
+}

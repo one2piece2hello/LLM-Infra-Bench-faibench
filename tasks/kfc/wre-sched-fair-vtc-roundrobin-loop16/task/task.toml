@@ -1,0 +1,53 @@
+# wre-sched-fair-vtc-roundrobin — CPU-lane. PERFORMANCE (implement from an empty stub).
+# SERVE/请求调度: multi-tenant VTC-style fair round-robin interleave order. PERFORMANCE (speedup).
+
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wre-sched-fair-vtc-roundrobin-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "multi-tenant VTC-style fair round-robin interleave order. PERFORMANCE (speedup)."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wre-sched-fair-vtc-roundrobin-loop16:v1-oraclev2@sha256:0a06f7e6164475292b34a97cfab5c8b6853cc6a4ac670e10ac3b5339da1ee107
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wre-sched-fair-vtc-roundrobin-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wre-sched-fair-vtc-roundrobin-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 4
+memory_mb = 16384
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "performance"
+contract_pattern = "kernelbench_generic_v1"
+timing_metric = "speedup"
+primary_edit_paths = ["submission/kernel.py"]
+forbidden_edit_paths = ["*"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+ref_speedup = 43.0923
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+[loop]
+# Exactly ONE graded submission (submit == finalize).
+# NOTE: the /opt/loop harness baked into the image applies its own 3/16 in-session budget; for in-session loop scoring the image is authoritative.
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"

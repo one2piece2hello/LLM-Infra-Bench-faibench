@@ -1,0 +1,53 @@
+# wre-modelload-mmap-multi-route — CPU-lane. PERFORMANCE (implement from an empty stub).
+# 模型加载与权重装载: multi-file mmap safetensors name->file last-write-wins routing. PERFORMANCE (speedup).
+
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wre-modelload-mmap-multi-route-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "multi-file mmap safetensors name->file last-write-wins routing. PERFORMANCE (speedup)."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wre-modelload-mmap-multi-route-loop16:v1-oraclev2@sha256:84c74c83eda8b1b2a914ac01b0e2bc1906f2a9e515e7f7ae8639640a344f49ec
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wre-modelload-mmap-multi-route-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wre-modelload-mmap-multi-route-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 4
+memory_mb = 16384
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "performance"
+contract_pattern = "kernelbench_generic_v1"
+timing_metric = "speedup"
+primary_edit_paths = ["submission/kernel.py"]
+forbidden_edit_paths = ["*"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+ref_speedup = 12195.12195
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+[loop]
+# Exactly ONE graded submission (submit == finalize).
+# NOTE: the /opt/loop harness baked into the image applies its own 3/16 in-session budget; for in-session loop scoring the image is authoritative.
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"

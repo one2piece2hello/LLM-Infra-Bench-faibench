@@ -1,0 +1,33 @@
+{
+  "schema_version": "kernelbench_correctness_manifest_v1",
+  "task_id": "insea-cpu-int4xint8-quantized-dot-loop16",
+  "task_kind": "acceleration",
+  "expected_case_count": 14,
+  "primary_workload": "blockdot-batch-Ir",
+  "ref_speedup": 1.0,
+  "ref_speedup_note": "Anchor 1.25313 calibrated in oracle mode on the authoring CPU lane (Intel Sapphire Rapids). tests/ref_speedup.txt is authoritative at scoring; this file is only the in-image fallback. See tests/ref_speedup.caveat.md to re-measure on your hardware.",
+  "metric": "callgrind_ir",
+  "direction": "higher_is_better",
+  "target_hardware": "cpu (x86-64 Sapphire Rapids; pure-Python stdlib -> no AVX-512 in hot path -> callgrind safe)",
+  "value_axis": "retired instruction count (Ir) for a batch of block-encoded integer dot products; the naive path locates the byte for each lane one lane at a time and applies the block's scale factor once per lane rather than once per block",
+  "correctness_axes": [
+    "normal_single_block_hand",
+    "normal_multi_block_matches_reference",
+    "boundary_single_block",
+    "boundary_empty_blocks",
+    "degenerate_zero_scale_block",
+    "degenerate_all_min_code",
+    "sign_zero_point_applied",
+    "sign_low_high_lane_pairing",
+    "error_block_count_mismatch",
+    "error_packed_block_length",
+    "error_code_block_length",
+    "metamorphic_scale_linearity",
+    "metamorphic_negate_codes",
+    "hidden_large_matches_reference"
+  ],
+  "public_symbol": "blocked_dot",
+  "primary_edit_paths": [
+    "/app/repo/blocked_dot.py"
+  ]
+}

@@ -1,0 +1,15 @@
+runs/
+summary.jsonl
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+*~
+*.swp
+*.orig
+*.bak
+*.bak_*
+task_catalog.zh-CN.json

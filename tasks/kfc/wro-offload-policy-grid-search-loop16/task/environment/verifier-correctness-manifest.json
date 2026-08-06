@@ -1,0 +1,11 @@
+{
+  "task_id": "wro-offload-policy-grid-search",
+  "perf_metric": "speedup",
+  "ref_speedup": 56.516589,
+  "oracle_candidate_ms": 21.8609,
+  "baseline_ms": 1235.5035,
+  "noop_speedup": 1.003657,
+  "baseline2_speedup": 2.580849,
+  "anchor_source": "4-mode validation run on the authoring CPU lane (Intel Sapphire Rapids)",
+  "notes": "ref_speedup is the oracle anchor measured on the authoring lane, not a locally re-measured number."
+}

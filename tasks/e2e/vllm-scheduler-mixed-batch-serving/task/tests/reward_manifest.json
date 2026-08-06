@@ -1,0 +1,230 @@
+{
+  "_comment": "FROZEN reward manifest — reviewer-owned, uploaded FRESH under /tests at scoring, NEVER baked into the image. compute_reward.py reads ref_speedup from here and NEVER runs the oracle.",
+  "task_id": "e2e-vllm-scheduler-mixed-batch-serving",
+  "schema": "e2e_reward_manifest_v1",
+  "task_kind": "performance",
+  "reward_model": "reward_md_log_speedup_v2_oracle_zero",
+  "reward_formula": "reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0; range [0,1]",
+  "metric_kind": "wallclock_latency_ratio",
+  "metric_name": "median_paired_speedup_over_6_hidden_workloads",
+  "metric_direction": "higher_is_better",
+  "timing_measured": true,
+  "expected_case_count": 1166,
+  "token_match_threshold": 0.95,
+  "speedup_definition": "ABBA paired: Phase 1 baseline server -> Phase 2 candidate server -> Phase 3 baseline re-check (B A B). The TIMED set is the 6 concurrent burst workloads, each re-measured in BOTH baseline phases, so every one is a real pair whose denominator is the mean of its two baseline measurements (the per-workload figure inside a phase is a median over the in-phase rounds). speedup = MEDIAN over those 6 paired ratios (>= the 5 pairs reward.md requires). The geomean is a DIAGNOSTIC only. The 3 sequential single-request cases are NOT timed — they are a latency-REGRESSION gate (see latency_regression_gate).",
+  "deviation_note": "A full 5x alternation of the WHOLE suite is not affordable: every phase is a separate vLLM server launch (~70 s each) plus a 1166-prompt token-parity collection. 6 paired workloads in a B-A-B alternation is the affordable faithful reading of reward.md's '>= 5 pairs'.",
+  "ref_speedup": {
+    "value": 1.2857108264648467,
+    "status": "CALIBRATED_MEDIAN_OF_5_FULL_GRADED_RUNS_CLEARS_THE_1_15_FLOOR",
+    "metric": "reward.md: median over >=5 oracle runs of the per-run `speedup`, where `speedup` is itself the MEDIAN of the 6 ABBA-paired per-burst ratios (B-A-B). Measured in the GRADED mode with the re-scoped timed set and the rebased (--max-num-seqs 64) frozen baseline.",
+    "oracle_impl": "solution/oracle_v2_launch_server.sh — the strong baseline's own flags plus --async-scheduling and --api-server-count 4. Reviewer-only, NEVER in the image, NEVER run at scoring: the scorer reads this constant and nothing else.",
+    "calibrated_on": "NVIDIA H20 2026-07-28, image e2e-vllm-scheduler-mixed-batch-serving:v2@sha256:d9f0b54e, gpu_num 1 / cpu 8000m / 96Gi",
+    "n_runs": 5,
+    "raw_values": [
+      1.2928376988399388,
+      1.2881781006521684,
+      1.2844123460642975,
+      1.2770889482818166,
+      1.2857108264648467
+    ],
+    "mean": 1.2856455840606136,
+    "min": 1.2770889482818166,
+    "max": 1.2928376988399388,
+    "stdev": 0.005763707653571287,
+    "cv_pct": 0.448,
+    "legality_floor": 1.15,
+    "clears_1_15": true,
+    "margin_above_floor_pct": 11.8,
+    "sensitivity": {
+      "reward_at_median": 0.5,
+      "reward_at_median_minus_3pct": 0.4394,
+      "reward_at_median_plus_3pct": 0.5588,
+      "reward_swing_for_pm3pct": 0.1194,
+      "reward_at_observed_min": 0.4866,
+      "reward_at_observed_max": 0.511,
+      "reward_swing_over_the_5_observed_runs": 0.0244,
+      "acceptance": "swing for +-3% must be well under ~0.2"
+    },
+    "per_workload_across_5_runs": {
+      "burst_256_short_heavy_mix": {
+        "values": [
+          1.0602,
+          1.1246,
+          1.0428,
+          0.9756,
+          1.0602
+        ],
+        "median": 1.06017,
+        "cv_pct": 5.02,
+        "responds_ge_1_15": false
+      },
+      "burst_128_decode_heavy_mix": {
+        "values": [
+          1.3343,
+          1.3271,
+          1.3156,
+          1.3846,
+          1.3576
+        ],
+        "median": 1.33428,
+        "cv_pct": 2.06,
+        "responds_ge_1_15": true
+      },
+      "burst_192_decode_heavy_mix": {
+        "values": [
+          1.2667,
+          1.2618,
+          1.2532,
+          1.2472,
+          1.2628
+        ],
+        "median": 1.26184,
+        "cv_pct": 0.63,
+        "responds_ge_1_15": true
+      },
+      "burst_256_decode_heavy_mix": {
+        "values": [
+          1.2294,
+          1.2392,
+          1.243,
+          1.2159,
+          1.2466
+        ],
+        "median": 1.23923,
+        "cv_pct": 1.0,
+        "responds_ge_1_15": true
+      },
+      "burst_96_all_longprefill": {
+        "values": [
+          1.4944,
+          1.4947,
+          1.5027,
+          1.4957,
+          1.5037
+        ],
+        "median": 1.49572,
+        "cv_pct": 0.31,
+        "responds_ge_1_15": true
+      },
+      "burst_160_all_longprefill": {
+        "values": [
+          1.319,
+          1.3145,
+          1.3233,
+          1.307,
+          1.3086
+        ],
+        "median": 1.31452,
+        "cv_pct": 0.52,
+        "responds_ge_1_15": true
+      }
+    },
+    "n_responding_workloads": "5 of 6",
+    "diagnostic_geomean_median": 1.27728,
+    "supersedes": "(1) null / NEEDS_CALIBRATION under the ORIGINAL scored set, whose ceiling was 1.0269 because 5 of its 6 workloads were scheduling-insensitive; (2) 1.00882, the median over 5 full runs after the baseline rebase alone — the rebase restored burst headroom but median-of-6 could not see it. The fix was the SCORED SET (raise burst concurrency), per the owner ruling.",
+    "reward_semantics_at_this_constant": {
+      "speedup == 1.28571": 0.5,
+      "speedup >= 1.65305 (ref^2)": 1.0,
+      "speedup <= 1.0": "0 (speedup_not_above_baseline)",
+      "the shipped starter": "measured median 0.7641 in the ladder probe => 0"
+    },
+    "hardware_caveat": "此 ref_speedup(=1.2857108264648467)在 H20 上标定;若运行硬件与 H20 不一致(GPU 峰值/显存带宽不同),该锚点不可直接沿用 —— 请在本机用 solution/ 下的 oracle 实现重新标定后再计分。",
+    "recalibrate_howto": {
+      "note": "本题是 serving 型 ABBA 配对基准:baseline server -> candidate server -> baseline 复核。重标锚点 = 在本机硬件上以 solution/ 里的 oracle 方案作为 candidate 跑一遍完整判分,取 >=3 次的 speedup 中位数。",
+      "step1": "把 solution/ 挂进容器: docker run --rm --gpus all -v \"$PWD/tests:/tests:ro\" -v \"$PWD/solution:/opt/negative:ro\" ...",
+      "step2": "用 oracle 方案替换 /app/submission/launch_server.sh 的启动策略后 bash /tests/test.sh",
+      "step3": "取 /logs/verifier 里的 speedup 中位数写回本文件 ref_speedup.value,并更新 status"
+    }
+  },
+  "pre_gates": [
+    "build_or_entry_contract_failed",
+    "correctness_failed",
+    "cheating_detected",
+    "forbidden_edit_path",
+    "speedup_not_above_baseline",
+    "ref_speedup_invalid_or_missing",
+    "sequential_latency_regression"
+  ],
+  "anti_cheat": {
+    "token_parity": "1166 hidden prompts, greedy, token-by-token vs the baseline; >= 0.95 required",
+    "pinned_paired_ratios": "all 6 paired ratios within 1e-4 of 1.0 => cheating_detected (the candidate is the baseline server / the timing path was bypassed)",
+    "decode_work_probe": "the same prompt at 8 vs 96 greedy tokens must show latency ratio >= 1.5 AND growing completion_tokens => a server that short-circuits generation is cheating_detected, not slow",
+    "source_scan": "test.sh rejects any /app/submission file that references the frozen evaluation surface => forbidden_edit_path",
+    "timer_daemon": "REPLACED 2026-07-27. The old check ('is the pid in /app/.timer/timer.pid alive?') was UNTRIPPABLE and therefore decorative: BASH_ENV=/etc/profile.d/frontier-task-init.sh restarts the daemon on the next non-interactive bash — i.e. on `bash /tests/test.sh` itself — and rewrites timer.pid. Two tampers were MEASURED leaving it green through full 820-840 s runs. Three trippable checks now, each proven to fire: (a) /app/timer.sh sha256 vs this manifest's frozen_sha256; (b) the published /app/.timer/budget_secs vs the harness's own TASK_BUDGET_SECS; (c) the published elapsed_secs must agree with `now - start_epoch` within 60 s. (c) is deliberately sleep-free and exact: the daemon ticks every 10 s, so a naive 'did elapsed_secs change over 3 s' probe false-positives on a healthy clock (measured). Any of the three => cheating_detected.",
+    "case_count": "len(prompts) must equal expected_case_count => forbidden_edit_path"
+  },
+  "submission_protocol": {
+    "min": 1,
+    "max": 16,
+    "stop": "model decides",
+    "note": "at most 16 submissions, at least 1; --finalize accepted at ANY k>=1; no minimum count and no 'N consecutive rounds without gain' rule. Enforced by /opt/loop/submit.sh in the loop16 overlay."
+  },
+  "frozen_sha256": {
+    "/app/timer.sh": "284b14ae3c668df7ee0b83fe3e5c8500618a0c223a2fbba5aa2580d9102cf1c1"
+  },
+  "frozen_sha256_provenance": "sha256 of task/environment/timer.sh, which the Dockerfile COPYs to /app/timer.sh. VERIFY IN-IMAGE before shipping: if the baked copy differs the timer gate hard-fails every run, so this value is re-checked in-image .",
+  "frozen_surface_note": "compute_reward.py was re-scoped 2026-07-28; its sha is re-pinned in verifier-correctness-manifest.json.",
+  "rescope_2026_07_28": {
+    "ruling": "owner: fix the metric/instruction mismatch, not the aggregation — RAISE the burst concurrency until the workloads measurably respond, keep >=3 responding in the median, and move the sequential single-request cases out of the median while keeping them as regression gates. Explicitly NOT permitted: narrowing the score to burst_128 alone (noisy, overfittable) or switching the aggregation statistic.",
+    "why": "MEASURED over 5 full graded runs of the previous set: only the 128-way burst responded (1.29-1.37) while the 64-way and 48-way bursts sat at 0.98-1.05 and the 3 sequential anchors at 0.96-1.05. Their concurrency was too low to stress scheduling on this hardware, so median-of-6 rested mostly on noise.",
+    "ladder_probe_measured": {
+      "note": "one baseline launch + one candidate launch across a 9-shape concurrency ladder, NVIDIA H20, rebased (--max-num-seqs 64) baseline; oracle = solution/oracle_v2_launch_server.sh; starter = the shipped /app/submission skeleton.",
+      "oracle": {
+        "short_heavy_128": 0.98274,
+        "short_heavy_192": 1.11197,
+        "short_heavy_256": 1.13884,
+        "decode_heavy_128": 1.31012,
+        "decode_heavy_192": 1.23489,
+        "decode_heavy_256": 1.22198,
+        "longprefill_96": 1.50889,
+        "longprefill_160": 1.30846,
+        "balanced_192": 1.03368
+      },
+      "starter": {
+        "short_heavy_128": 0.95782,
+        "short_heavy_192": 0.74583,
+        "short_heavy_256": 0.8116,
+        "decode_heavy_128": 0.82683,
+        "decode_heavy_192": 0.76008,
+        "decode_heavy_256": 0.76813,
+        "longprefill_96": 0.7288,
+        "longprefill_160": 0.66471,
+        "balanced_192": 0.66391
+      },
+      "oracle_responding_ge_1_15": "5 of 9",
+      "starter_responding_ge_1_15": "0 of 9 (max 0.95782) — raising concurrency HURTS the narrow-admission starter, as expected"
+    },
+    "chosen_timed_set": {
+      "burst_256_short_heavy_mix": 1.13884,
+      "burst_128_decode_heavy_mix": 1.31012,
+      "burst_192_decode_heavy_mix": 1.23489,
+      "burst_256_decode_heavy_mix": 1.22198,
+      "burst_96_all_longprefill": 1.50889,
+      "burst_160_all_longprefill": 1.30846
+    },
+    "selection_rationale": "6 workloads across all THREE request-mix families (short-heavy, decode-heavy, all-long-prefill), 5 of 6 responding >= 1.15. Six rather than five so a single failed workload still leaves the 5 pairs reward.md requires. short_heavy_256 is kept even though it measures 1.139 (just under 1.15) precisely so the set is not the cherry-picked winners.",
+    "excluded_and_why": {
+      "short_heavy_128": "0.98274 — does not respond even at 128",
+      "short_heavy_192": "1.11197 — responds only marginally; short_heavy_256 represents the family",
+      "balanced_192": "1.03368 — an even mix does not concentrate scheduler pressure"
+    },
+    "shapes_unchanged": "the request-mix SHAPES reuse the same short / long-prefill / medium building blocks as the shipped set; only the concurrency is raised (and one shape per family retained at its original concurrency where it already responded).",
+    "sequential_cases_kept_as_a_gate": "short_in_short_out / longprefill_med_out / med_in_long_out are still measured (cheaper iteration counts) and gated at ratio >= 0.85, named sequential_latency_regression. Tolerance from measurement: the worst honest sequential ratio observed across 13 oracle configurations and 5 full graded runs was 0.9579. Keeping them as a gate closes the hole that excluding them entirely would open — a candidate winning the bursts by tanking single-request latency.",
+    "probe_predicted": {
+      "oracle_median_of_the_chosen_6": 1.27168,
+      "starter_median": 0.76411,
+      "sensitivity_pm3pct_reward_swing": 0.1249,
+      "clears_1_15": true,
+      "note": "probe-harness numbers (reduced rounds); the SHIPPED constant comes from >=5 FULL graded runs."
+    }
+  },
+  "latency_regression_gate": {
+    "min_ratio": 0.85,
+    "named_reason": "sequential_latency_regression",
+    "workloads": [
+      "short_in_short_out",
+      "longprefill_med_out",
+      "med_in_long_out"
+    ]
+  }
+}

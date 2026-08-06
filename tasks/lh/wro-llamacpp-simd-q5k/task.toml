@@ -1,0 +1,57 @@
+# wro-llamacpp-simd-q5k — ggml Q5_K×Q8_K CPU SIMD dot-product (arch/x86/quants.c)
+# Long-horizon acceleration task. reward = raw speedup, noop ~= 1.0.
+
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wro-llamacpp-simd-q5k"
+bench = "lh"
+kind = "performance"
+language = "cpp"
+title = "ggml Q5_K×Q8_K CPU SIMD dot-product (arch/x86/quants.c)"
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wro-llamacpp-simd-q5k-loop16:v1-ms1@sha256:2721d203d2ed366feaad473cdd3d5dc50b55d7430607d014587101cbe89ff468
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/lh-llamacpp-simd-q5k:oss .`
+[environment]
+docker_image = "fai/lh-llamacpp-simd-q5k:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 0   # CPU-lane host-logic/compute scope; needs no card
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "acceleration"
+contract_pattern = "single_file_scope"
+timing_metric = "speedup"
+primary_edit_paths = ["ggml/src/ggml-cpu/arch/x86/quants.c"]
+forbidden_edit_paths = ["*"]   # everything outside primary_edit_paths hard-fails the scope gate
+result_paths = ["/logs/verifier"]
+
+# 🔴 换硬件/换环境要重测锚点。本题 gpus = 0,ref_speedup 在**作者的 CPU 通道
+#    (Intel Sapphire Rapids)**上标定;单核吞吐差异大的机器上比值会偏。换机器时:
+#    按 tests/verifier-correctness-manifest.json 的 recalibrate_howto,用本题包的
+#    oracle.patch 在本机重新标定 ref_speedup(建议 >=3 次取中位数),再计分。
+# 🔴 本题 tests/test.sh 硬编码 ref_speedup=11.53 且**不读** manifest —— 重标时两处都要改。
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+noop_value = 1.0
+ref_speedup = 11.53
+ref_speedup_source = "tests/verifier-correctness-manifest.json"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+[loop]
+min_submissions = 1
+max_submissions = 16
+submit = "bash /opt/loop/submit.sh"

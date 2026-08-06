@@ -1,0 +1,49 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wro-deepspeed-curriculum-cluster-select-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "curriculum_cluster.py implements curriculum-learning difficulty-cluster selection …"
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wro-deepspeed-curriculum-cluster-select-loop16:v1@sha256:a544e9d3a324523f6d852c174c92b6ae1ebe40c5accb62e0bdab1658c3ae3603
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wro-deepspeed-curriculum-cluster-select-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wro-deepspeed-curriculum-cluster-select-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timing_metric = "speedup"
+primary_edit_paths = ["curriculum_cluster.py"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+ref_speedup = 20.777027
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+[loop]
+# NOTE: the /opt/loop harness baked into the image applies its own 3/16 in-session budget; for in-session loop scoring the image is authoritative.
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+# Single-submission policy — min=max=1; the first
+# `bash /opt/loop/submit.sh` IS the final graded submission (submit == finalize).
+declared_submission_policy = "single_submission"

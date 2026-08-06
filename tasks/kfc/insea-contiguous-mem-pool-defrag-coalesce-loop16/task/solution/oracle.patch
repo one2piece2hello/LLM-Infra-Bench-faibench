@@ -1,0 +1,422 @@
+diff --git a/mem_pool.py b/mem_pool.py
+index b843139..3186b0d 100644
+--- a/mem_pool.py
++++ b/mem_pool.py
+@@ -62,25 +62,19 @@ Invariants (true after every operation)
+ * after any ``release`` no two adjacent free runs remain un-merged;
+ * ``allocate(n)`` returns ``None`` iff ``n > total_free()`` (for ``n > 0``).
+ 
+-Why the current implementation is slow
+---------------------------------------
+-This reference keeps the free runs in a plain list and, on **every** ``release``,
+-appends the freed run and then re-sorts the whole list and re-scans it to merge
+-neighbours; on **every** ``allocate`` it re-sorts the free list again to find the
+-lowest-address fit; and it recomputes ``total_free`` / ``largest_free`` by scanning
+-all free runs each time. When the arena is fragmented into many small free runs
+-(the common case after a long mix of allocations and releases), the repeated full
+-re-sorts and scans dominate the cost. Make the pool **faster** — do the same work
+-with fewer element operations for the same placements and the same decisions — for
+-example by keeping the free runs organized so a release merges its neighbours and
+-an allocation finds its fit without re-sorting the whole list every time.
+-
+-Note on allowed operations
+---------------------------
+-Implement the free-run bookkeeping, the neighbour merge, the first-fit search, and
+-the compaction relocation yourself. Do not delegate to a real device / OS allocator
+-or an array library — the scoring harness scans the submitted file for those and
+-scores the task 0.
++Implementation
++--------------
++Free runs live in a binary search tree keyed by start address. Each node is a
++5-slot list ``[start, length, left, right, top]`` where ``top`` is the maximum
++``length`` over the node's subtree. The augmentation makes ``largest_free`` an
++``O(1)`` read of the root, makes "no run fits" an ``O(1)`` check, and lets
++first-fit run as a single root-to-leaf descent (go left while the left subtree
++can hold the request, else take the node if it fits, else go right). Releases
++merge the freed run with its address neighbours found on the insert descent
++(plus the subtree-extremal neighbours after a merge); ``top`` values are
++repaired bottom-up along the walked paths. The total free cell count is
++maintained incrementally. Compaction walks the live handles once in
++ascending-offset order.
+ """
+ 
+ 
+@@ -91,137 +85,291 @@ def _check_size(size):
+         raise ValueError(f"size must be >= 1, got {size}")
+ 
+ 
+-def _check_alloc_size(size):
+-    if isinstance(size, bool) or not isinstance(size, int):
+-        raise TypeError(f"allocate size must be an int, got {type(size).__name__}")
+-    if size < 0:
+-        raise ValueError(f"allocate size must be >= 0, got {size}")
++def _fixmax(path, end=None):
++    # repair subtree-max fields bottom-up along path[0:end]; every child below
++    # the start of the walk must already be final. Stops as soon as a node's
++    # stored max is still correct (then no ancestor can change either).
++    if end is None:
++        end = len(path)
++    for i in range(end - 1, -1, -1):
++        n = path[i]
++        m = n[1]
++        left = n[2]
++        right = n[3]
++        if left is not None and left[4] > m:
++            m = left[4]
++        if right is not None and right[4] > m:
++            m = right[4]
++        if m == n[4]:
++            break
++        n[4] = m
++
++
++def _fixmax_full(path):
++    # repair subtree-max fields bottom-up along the whole path; used when a
++    # node's own length was mutated before the walk, so no early stop is sound.
++    for i in range(len(path) - 1, -1, -1):
++        n = path[i]
++        m = n[1]
++        left = n[2]
++        right = n[3]
++        if left is not None and left[4] > m:
++            m = left[4]
++        if right is not None and right[4] > m:
++            m = right[4]
++        n[4] = m
+ 
+ 
+ class MemoryPool:
+-    """See the module docstring for the full contract.
++    """Free runs in an address-ordered BST augmented with subtree max length."""
+ 
+-    Naive reference allocator: free runs live in an unordered ``list`` of
+-    ``[start, size]`` pairs. Every ``release`` re-sorts and re-scans the whole free
+-    list to merge neighbours; every ``allocate`` re-sorts it again to find the
+-    lowest-address fit; ``total_free`` / ``largest_free`` scan all free runs. Correct,
+-    but the work grows with the number of free runs on every single operation.
+-    """
++    __slots__ = (
++        "size", "_next_handle", "_reloc", "_tf",
++        "_root", "_live", "_zero",
++    )
+ 
+     def __init__(self, size=1):
+         _check_size(size)
+         self.size = int(size)
+-        # free runs as [start, length]; NOT kept in any order between ops.
+-        self._free = [[0, self.size]]
+-        # handle -> [offset, length] for live, non-zero-size allocations.
+-        self._live = {}
+-        # zero-size handles occupy nothing; tracked so release/offset_of work.
+-        self._zero = set()
+         self._next_handle = 0
+         self._reloc = 0
++        self._tf = self.size            # total free cells, maintained incrementally
++        # address BST nodes: [start, length, left, right, subtree-max length]
++        self._root = [0, self.size, None, None, self.size]
++        self._live = {}                 # handle -> [offset, length]
++        self._zero = set()              # live zero-size handles
+ 
+     # -- observers ---------------------------------------------------------- #
+     def total_free(self):
+-        used = 0
+-        for _off, ln in self._live.values():
+-            used += ln
+-        return self.size - used
++        return self._tf
+ 
+     def largest_free(self):
+-        best = 0
+-        for _start, ln in self._free:
+-            if ln > best:
+-                best = ln
+-        return best
++        root = self._root
++        return root[4] if root is not None else 0
+ 
+     def relocated_blocks(self):
+         return self._reloc
+ 
+     def offset_of(self, handle):
++        run = self._live.get(handle)
++        if run is not None:
++            return run[0]
+         if handle in self._zero:
+             return 0
+-        if handle not in self._live:
+-            raise KeyError(f"unknown or released handle {handle!r}")
+-        return self._live[handle][0]
+-
+-    # -- internals ---------------------------------------------------------- #
+-    def _resort_free(self):
+-        # naive: re-sort the entire free list by start address every time.
+-        self._free.sort(key=lambda run: run[0])
+-
+-    def _coalesce_all(self):
+-        # naive: after any change, re-sort and do a full linear merge pass over the
+-        # whole free list.
+-        self._resort_free()
+-        merged = []
+-        for start, ln in self._free:
+-            if ln <= 0:
+-                continue
+-            if merged and merged[-1][0] + merged[-1][1] == start:
+-                merged[-1][1] += ln
+-            else:
+-                merged.append([start, ln])
+-        self._free = merged
++        raise KeyError(f"unknown or released handle {handle!r}")
++
++    # -- free-tree internals ------------------------------------------------ #
++    def _try_merge_successor(self, node):
++        # node must have a right child: if the right subtree's minimum run is
++        # adjacent to node's end, fold it into node. Returns True if merged.
++        sub = [node]
++        parent = node
++        cur = node[3]
++        while cur[2] is not None:
++            sub.append(cur)
++            parent = cur
++            cur = cur[2]
++        start = cur[0]
++        length = cur[1]
++        if node[0] + node[1] != start:
++            return False
++        if parent is node:
++            parent[3] = cur[3]
++        else:
++            parent[2] = cur[3]
++        node[1] += length
++        if node[1] > node[4]:
++            node[4] = node[1]
++        _fixmax_full(sub)
++        return True
++
++    def _try_merge_predecessor(self, node):
++        # node must have a left child: if the left subtree's maximum run is
++        # adjacent to node's start, fold it into node. Returns True if merged.
++        sub = [node]
++        parent = node
++        cur = node[2]
++        while cur[3] is not None:
++            sub.append(cur)
++            parent = cur
++            cur = cur[3]
++        start = cur[0]
++        length = cur[1]
++        if start + length != node[0]:
++            return False
++        if parent is node:
++            parent[2] = cur[2]
++        else:
++            parent[3] = cur[2]
++        node[0] = start
++        node[1] += length
++        if node[1] > node[4]:
++            node[4] = node[1]
++        _fixmax_full(sub)
++        return True
+ 
+     def _compact(self):
+-        # slide every live run toward the front in ascending-offset order, keeping
+-        # relative order and packing with no gaps.
+-        order = sorted(self._live.items(), key=lambda kv: kv[1][0])
++        # slide every live run toward the front in ascending-offset order,
++        # keeping relative order and packing with no gaps.
+         cur = 0
+-        for handle, run in order:
++        moved = 0
++        for run in sorted(self._live.values()):
+             if run[0] != cur:
+                 run[0] = cur
+-                self._reloc += 1
++                moved += 1
+             cur += run[1]
+-        # one trailing free run holds all the freed space.
+-        if cur < self.size:
+-            self._free = [[cur, self.size - cur]]
++        self._reloc += moved
++        # one trailing free run holds all the freed space
++        free_len = self.size - cur
++        if free_len:
++            self._root = [cur, free_len, None, None, free_len]
+         else:
+-            self._free = []
++            self._root = None
+ 
+     # -- mutators ----------------------------------------------------------- #
+     def allocate(self, size):
+-        _check_alloc_size(size)
++        if isinstance(size, bool) or not isinstance(size, int):
++            raise TypeError(f"allocate size must be an int, got {type(size).__name__}")
++        if size < 0:
++            raise ValueError(f"allocate size must be >= 0, got {size}")
+         if size == 0:
+             handle = self._next_handle
+             self._next_handle += 1
+             self._zero.add(handle)
+             return handle
+-        if size > self.total_free():
++        if size > self._tf:
+             return None
+-        # naive first-fit: re-sort every call, then linear scan for lowest fit.
+-        self._resort_free()
+-        chosen = -1
+-        for i, (_start, ln) in enumerate(self._free):
+-            if ln >= size:
+-                chosen = i
+-                break
+-        if chosen < 0:
+-            # no single run fits but total free does -> compact, then place at front.
++        root = self._root
++        if root[0] == 0 and root[1] >= size:
++            # fast path: the leftmost run starts at 0 and fits
++            node = root
++            path = [root]
++        elif root[4] < size:
++            # no single run fits but total free does -> compact, then place
+             self._compact()
+-            chosen = 0
+-            for i, (_start, ln) in enumerate(self._free):
+-                if ln >= size:
+-                    chosen = i
++            node = self._root
++            path = [node]
++        else:
++            # first-fit descent guided by the subtree maxes: go left while the
++            # left subtree can hold the request, else take the node if it
++            # fits, else go right (guaranteed to hold it).
++            path = []
++            node = root
++            while True:
++                path.append(node)
++                left = node[2]
++                if left is not None and left[4] >= size:
++                    node = left
++                elif node[1] >= size:
+                     break
+-        start, ln = self._free[chosen]
+-        offset = start
+-        if ln == size:
+-            self._free.pop(chosen)
++                else:
++                    node = node[3]
++        # carve `size` cells from the front of `node`
++        start = node[0]
++        length = node[1]
++        if length == size:
++            left = node[2]
++            right = node[3]
++            if left is None:
++                if len(path) == 1:
++                    self._root = right
++                else:
++                    parent = path[-2]
++                    if parent[2] is node:
++                        parent[2] = right
++                    else:
++                        parent[3] = right
++                path.pop()
++                _fixmax(path)
++            else:
++                # promote the in-order predecessor (left subtree's maximum)
++                sub = [node]
++                pparent = node
++                cur = left
++                while cur[3] is not None:
++                    sub.append(cur)
++                    pparent = cur
++                    cur = cur[3]
++                if pparent is node:
++                    node[2] = cur[2]
++                else:
++                    pparent[3] = cur[2]
++                node[0] = cur[0]
++                node[1] = cur[1]
++                _fixmax_full(sub)
++                path.pop()
++                _fixmax(path)
+         else:
+-            self._free[chosen] = [start + size, ln - size]
++            node[0] = start + size
++            node[1] = length - size
++            if len(path) == 1:
++                # shallow case: only the node's own max can change
++                m = length - size
++                left = node[2]
++                right = node[3]
++                if left is not None and left[4] > m:
++                    m = left[4]
++                if right is not None and right[4] > m:
++                    m = right[4]
++                node[4] = m
++            else:
++                _fixmax(path)
++        self._tf -= size
+         handle = self._next_handle
+         self._next_handle += 1
+-        self._live[handle] = [offset, size]
++        self._live[handle] = [start, size]
+         return handle
+ 
+     def release(self, handle):
+-        if handle in self._zero:
+-            self._zero.discard(handle)
+-            return
+-        if handle not in self._live:
++        run = self._live.pop(handle, None)
++        if run is None:
++            if handle in self._zero:
++                self._zero.discard(handle)
++                return
+             raise KeyError(f"unknown or released handle {handle!r}")
+-        offset, ln = self._live.pop(handle)
+-        # naive: append the freed run, then re-sort + full merge pass.
+-        self._free.append([offset, ln])
+-        self._coalesce_all()
++        off, length = run
++        self._tf += length
++        node = self._root
++        if node is None:
++            self._root = [off, length, None, None, length]
++            return
++        # insert the freed run by start address, merging with an address
++        # neighbour when found; ancestor maxes are raised to cover `length`
++        # during the descent, so a plain leaf insert needs no repair walk.
++        path = []
++        while True:
++            path.append(node)
++            if length > node[4]:
++                node[4] = length
++            if off < node[0]:
++                if node[0] == off + length:
++                    # freed run ends exactly at this run's start: extend leftward
++                    node[0] = off
++                    node[1] += length
++                    if node[1] > node[4]:
++                        node[4] = node[1]
++                    break
++                nxt = node[2]
++                if nxt is None:
++                    node[2] = [off, length, None, None, length]
++                    return
++                node = nxt
++            else:
++                if node[0] + node[1] == off:
++                    # freed run starts exactly at this run's end: extend rightward
++                    node[1] += length
++                    if node[1] > node[4]:
++                        node[4] = node[1]
++                    break
++                nxt = node[3]
++                if nxt is None:
++                    node[3] = [off, length, None, None, length]
++                    return
++                node = nxt
++        # merged into `node`; it may now touch further runs on either side
++        if node[2] is not None:
++            self._try_merge_predecessor(node)
++        if node[3] is not None:
++            self._try_merge_successor(node)
++        if len(path) > 1:
++            _fixmax(path, len(path) - 1)

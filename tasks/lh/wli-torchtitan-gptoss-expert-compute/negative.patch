@@ -1,0 +1,7 @@
+diff --git a/torchtitan/models/gpt_oss/_expert_scratch.py b/torchtitan/models/gpt_oss/_expert_scratch.py
+new file mode 100644
+--- /dev/null
++++ b/torchtitan/models/gpt_oss/_expert_scratch.py
+@@ -0,0 +1,2 @@
++# known-bad: an out-of-scope edit; the scope gate must zero this submission.
++CHEAT = True

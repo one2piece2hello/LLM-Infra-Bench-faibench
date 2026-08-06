@@ -1,0 +1,14 @@
+{
+  "ref_speedup": 11.53,
+  "hardware_caveat": "此 ref_speedup 在**作者的 CPU 通道(Intel Sapphire Rapids)**上标定 —— 本题 task.toml 声明 gpus = 0,判分路径不使用 GPU。⚠️ 该锚点对 CPU 微架构敏感,但编译 ISA 是固定的(-DGGML_AVX2=ON -DGGML_NATIVE=OFF,不跟随 -march=native),所以同为 AVX2 的机器上比值相对稳定。🔴 注意:本题 tests/test.sh **不读**本文件 —— 它在 ref_speedup=11.53 处硬编码同一常量(两处已对齐)。改锚点必须同时改 tests/test.sh 的那一行。换硬件/换环境时请先按 recalibrate_howto 用 tests/oracle.patch 在本机重标该锚点,再计分。 本题 ref_speedup=11.53。",
+  "recalibrate_howto": {
+    "note": "verifier 原生支持模式分派;参考实现按路径传入、从不烤进镜像。模式:candidate | noop | oracle | negative",
+    "step1_oracle": "docker run --rm -v \"$PWD/tests:/tests:ro\" -v \"$PWD:/patches:ro\" -e KERNELBENCH_VERIFY_MODE=oracle -e KERNELBENCH_ORACLE_PATCH=/patches/oracle.patch fai/lh-llamacpp-simd-q5k:oss bash /tests/test.sh",
+    "step2_read": "从 /logs/verifier/ 读实测 speedup(建议 >=3 次取中位数)",
+    "step3_write": "写回本文件 ref_speedup;镜像内 /opt/ 的副本由 Dockerfile 从本文件 COPY,重建镜像即同步",
+    "sanity_noop": "-e KERNELBENCH_VERIFY_MODE=noop → 未改动的树应得 no-op 值",
+    "sanity_negative": "-e KERNELBENCH_VERIFY_MODE=negative -e KERNELBENCH_NEGATIVE_PATCH=/patches/negative.patch → 必须 0",
+    "oracle_impl": "本 task 目录下的 oracle.patch(reviewer-only,已被 environment/.dockerignore 排除)"
+  },
+  "calibrated_on": "CPU lane (Intel Sapphire Rapids); ggml Q5_K x Q8_K dot product compiled with a FIXED ISA (-DGGML_AVX2=ON -DGGML_NATIVE=OFF, i.e. it does NOT follow -march=native); ABBA median oracle-vs-baseline speedup in this same image"
+}

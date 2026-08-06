@@ -1,0 +1,1 @@
+{"oracle_ms": 1077936128.0, "perf_metric": "peak_bytes", "reward_form": "vs_oracle = oracle_bytes/candidate_bytes (peak GPU bytes reported in the timing_ms field; LOWER bytes = better; oracle=1.0)"}

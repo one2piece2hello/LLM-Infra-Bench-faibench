@@ -1,0 +1,49 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wro-colossalai-devicemesh-rank-collate-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "You are given a working implementation of a device-mesh process-group planner."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wro-colossalai-devicemesh-rank-collate-loop16:v1@sha256:475889f64968aea8569d580089e6fc60a9652f7ea2e215faed56955143bc8c05
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wro-colossalai-devicemesh-rank-collate-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wro-colossalai-devicemesh-rank-collate-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "acceleration"
+contract_pattern = "acceleration"
+primary_edit_paths = ["colossalai/device/device_mesh.py"]
+forbidden_edit_paths = ["*"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+ref_speedup = 7.005358
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+[loop]
+# Exactly ONE graded submission (submit == finalize).
+# NOTE: the /opt/loop harness baked into the image applies its own 3/16 in-session budget; for in-session loop scoring the image is authoritative.
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"

@@ -1,0 +1,50 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wre-parallel-all2all-redistribute-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "submission/kernel.py ships with a required routine whose body is not implemented (it raises NotImplementedError)."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wre-parallel-all2all-redistribute-loop16:v1@sha256:eb225498934340653be43429b9d3cae697c6f94555a0cbfc8140e002ec6b0a2b
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wre-parallel-all2all-redistribute-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wre-parallel-all2all-redistribute-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 49152
+gpus = 1
+# H20 只是**锚点标定用卡**,不是硬性限制。换卡时:①按 tests/ref_speedup.caveat.md 重标锚点;
+#   ②用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像。
+gpu_types = ["H20"]
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timing_metric = "speedup"
+primary_edit_paths = ["submission/kernel.py"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+reward_formula = "performance: reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0 — 0.5 at parity with the oracle, capped 1.0 at oracle^2; 0 if a hard gate fails or speedup <= 1. ref_speedup source unchanged (tests/ref_speedup.txt or the in-image manifest)."
+ref_speedup = 1428.571429
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "NVIDIA H20"
+
+[loop]
+# NOTE: the /opt/loop harness baked into the image applies its own 3/16 in-session budget; for in-session loop scoring the image is authoritative.
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"

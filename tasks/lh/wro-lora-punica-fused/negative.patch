@@ -1,0 +1,13 @@
+diff --git a/vllm/lora/ops/triton_ops/lora_shrink_op.py b/vllm/lora/ops/triton_ops/lora_shrink_op.py
+index 7ba6fbc..6c5099b 100644
+--- a/vllm/lora/ops/triton_ops/lora_shrink_op.py
++++ b/vllm/lora/ops/triton_ops/lora_shrink_op.py
+@@ -52,7 +52,7 @@ def _lora_shrink(
+             if not bool(mask.any()):
+                 continue
+             Aw = A[lid].reshape(rank, hidden)
+-            out_sl = (x[mask] @ Aw.t()) * scaling
++            out_sl = x[mask] @ Aw.t()  # NEGATIVE: drop scaling
+             output_tensor[s][mask] = out_sl.to(output_tensor.dtype)
+ 
+ 

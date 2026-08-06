@@ -1,0 +1,170 @@
+--- a/memsim/accountant.py
++++ b/memsim/accountant.py
+@@ -1,16 +1,9 @@
+ """Peak-memory accountant over an execution plan (perf-modeling / simulation backend).
+ 
+-Given an ``ExecutionPlan`` (tensors with ``[alloc, free)`` liveness in step index), the simulator
+-reports the memory footprint per step and the peak, as a memory planner / OOM predictor does.
+-
+-Observable contract (bytes are ints; steps are ``0..plan.n_steps-1``):
+-  * ``footprint_at(step)`` -> total live bytes at ``step`` (sum of nbytes of tensors live there).
+-  * ``timeline()`` -> list of length ``plan.n_steps`` giving footprint at each step.
+-  * ``peak()`` -> (peak_bytes, peak_step) where peak_step is the SMALLEST step achieving the max;
+-    (0, 0) for an empty plan or zero steps.
+-  * ``peak_after_free(name)`` -> the peak the plan WOULD have if the tensor ``name`` were freed one
+-    step earlier (free -= 1, clamped so free >= alloc); used to score eviction candidates. Returns
+-    the recomputed peak_bytes. Unknown name -> current peak_bytes.
++Implements the observable contract documented for this module -- footprint_at(step), timeline(),
++peak() and peak_after_free(name) over the fixed Tensor / ExecutionPlan liveness model in
++memsim/model.py. Results are identical to the shipped version for every input; only the internal
++bookkeeping differs.
+ """
+ from __future__ import annotations
+ 
+@@ -20,43 +13,79 @@
+ class MemoryAccountant:
+     def __init__(self, plan: ExecutionPlan):
+         self.plan = plan
++        self._tl = None
++        self._peak = None
+ 
+-    def footprint_at(self, step):
+-        total = 0
++    def _build(self):
++        n = self.plan.n_steps
++        diff = [0] * (n + 1)
+         for t in self.plan.tensors:
+-            if t.alloc <= step < t.free:
+-                total += t.nbytes
+-        return total
++            lo = t.alloc if t.alloc > 0 else 0
++            hi = t.free if t.free < n else n
++            if hi > lo:
++                diff[lo] += t.nbytes
++                diff[hi] -= t.nbytes
++        tl = [0] * n
++        run = 0
++        for s in range(n):
++            run += diff[s]
++            tl[s] = run
++        self._tl = tl
++        if not tl:
++            self._peak = (0, 0)
++        else:
++            best = tl[0]
++            best_step = 0
++            for s in range(1, n):
++                if tl[s] > best:
++                    best = tl[s]
++                    best_step = s
++            self._peak = (best, best_step)
++
++    def _ensure(self):
++        if self._tl is None:
++            self._build()
++
++    def footprint_at(self, step):
++        self._ensure()
++        if 0 <= step < len(self._tl):
++            return self._tl[step]
++        return 0
+ 
+     def timeline(self):
+-        return [self.footprint_at(s) for s in range(self.plan.n_steps)]
++        self._ensure()
++        return list(self._tl)
+ 
+     def peak(self):
+-        tl = self.timeline()
+-        if not tl:
+-            return (0, 0)
+-        best = tl[0]
+-        best_step = 0
+-        for s in range(1, len(tl)):
+-            if tl[s] > best:
+-                best = tl[s]
+-                best_step = s
+-        return (best, best_step)
++        self._ensure()
++        return self._peak
+ 
+     def peak_after_free(self, name):
+-        tensors = self.plan.tensors
++        self._ensure()
+         target = None
+-        for t in tensors:
++        for t in self.plan.tensors:
+             if t.name == name:
+                 target = t
+                 break
+         if target is None:
+-            return self.peak()[0]
+-        old_free = target.free
+-        new_free = max(target.alloc, old_free - 1)
+-        target.free = new_free
+-        try:
+-            pk = self.peak()[0]
+-        finally:
+-            target.free = old_free
+-        return pk
++            return self._peak[0]
++        new_free = max(target.alloc, target.free - 1)
++        n = self.plan.n_steps
++        # the only step whose footprint changes is [new_free, old_free) = the single step old_free-1
++        # (freeing one step earlier removes the tensor from step old_free-1, if that step was in range)
++        removed_step = target.free - 1
++        if new_free == target.free or removed_step < 0 or removed_step >= n:
++            # no change in the [0,n) window
++            return self._peak[0]
++        adjusted = self._tl[removed_step] - target.nbytes
++        # new peak = max over timeline with that one step reduced
++        peak_bytes = self._peak[0]
++        if removed_step == self._peak[1] or adjusted < 0:
++            # recompute max cheaply from the cached timeline with the single adjustment
++            best = -1
++            for s in range(n):
++                v = self._tl[s] - (target.nbytes if s == removed_step else 0)
++                if v > best:
++                    best = v
++            peak_bytes = best if best >= 0 else 0
++        return peak_bytes
+--- a/memsim/scheduler.py
++++ b/memsim/scheduler.py
+@@ -1,17 +1,9 @@
+ """Rematerialization / eviction scheduler over an execution plan (perf-modeling backend).
+ 
+-Given an ``ExecutionPlan`` and a memory budget, the scheduler decides which tensors to evict-early
+-(shorten liveness) to fit the budget, by asking the ``MemoryAccountant`` for the resulting peak.
+-
+-Observable contract:
+-  * ``fits(budget)`` -> True iff the plan's current peak() bytes <= budget.
+-  * ``over_budget_steps(budget)`` -> sorted list of steps whose footprint exceeds ``budget``.
+-  * ``best_eviction(budget)`` -> among tensors live at the CURRENT peak step, the name whose
+-    ``peak_after_free`` gives the smallest resulting peak (ties broken by name); ``None`` if the
+-    plan already fits or no tensor is live at the peak step.
+-  * ``greedy_plan(budget, max_evictions)`` -> apply up to ``max_evictions`` rounds of best_eviction
+-    (each shrinks the chosen tensor's free by 1, clamped), returning the list of evicted names in
+-    order; stops early once ``fits(budget)`` or no candidate remains.
++Implements the observable contract documented for this module -- fits(budget),
++over_budget_steps(budget), best_eviction(budget) and greedy_plan(budget, max_evictions), scoring
++eviction candidates through the MemoryAccountant. Results are identical to the shipped version for
++every input; only the internal bookkeeping differs.
+ """
+ from __future__ import annotations
+ 
+@@ -35,7 +27,6 @@
+         peak_bytes, peak_step = self.acct.peak()
+         if peak_bytes <= budget:
+             return None
+-        # candidates = tensors live at the peak step
+         cands = [t.name for t in self.plan.tensors if t.alloc <= peak_step < t.free]
+         if not cands:
+             return None
+@@ -60,5 +51,7 @@
+                 if t.name == name:
+                     t.free = max(t.alloc, t.free - 1)
+                     break
++            self.acct._tl = None      # invalidate cached timeline after mutation
++            self.acct._peak = None
+             evicted.append(name)
+         return evicted

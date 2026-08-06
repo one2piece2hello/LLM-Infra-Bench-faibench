@@ -1,0 +1,81 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "jit-source-arch-cache-key"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "You are working on the work-reuse layer of a batch build service."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 21600
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/insea-jit-source-arch-cache-key-loop16:loop-20260721T021500Z@sha256:b6e1405e15730a4d2605a010e43a832c62e79d533833700356bd01e7e77fea6d
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-jit-source-arch-cache-key:oss .`
+[environment]
+docker_image = "fai/kfc-jit-source-arch-cache-key:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 16000
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timeout_sec = 3600
+task_kind = "acceleration"
+contract_pattern = "A"
+timing_metric = "recompile_count"
+candidate_source_root = "/app/repo"
+primary_edit_paths = ["/app/repo/identity_key.py"]
+forbidden_edit_paths = ["/app/repo/tests/**", "/opt/verifier-*", "/tests/**", "/opt/loop/**"]
+result_paths = [
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+]
+
+[primary_metric]
+name = "buildspec_identity_recompile_count_speedup"
+goal = "maximize"
+metric_kind = "recompile_count"
+reward_formula = "acceleration: reward = measured speedup = baseline_recompiles / candidate_recompiles, where recompile_count = the number of DISTINCT identities a module's identity_key produces over a fixed labeled workload of build-specs (48 specs = 12 true equivalence classes x 4 spellings). Deterministic and hardware-portable (pure-Python stdlib, fixed FNV-1a/sha1 hash; no profiler). The frozen baseline emits one identity per spelling (~48) so its own speedup is ~1.0; a full normalizer emits one per true class (~12) -> speedup ~4.0. The 12-case hidden correctness suite, the whole-workload no-false-merge safety gate (any identity shared by two DIFFERENT true classes = correctness failure -> reward 0; two specs differing only in target profile are DIFFERENT classes), and the anti-cheat (only identity_key.py may change; no tensor/graph framework or harness import) are hard gates."
+ref_speedup = 4.0
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+correctness_gates = [
+    "hidden_case_suite",
+    "returns_string_for_various",
+    "deterministic_repeat_same_object",
+    "deterministic_fresh_build",
+    "distinct_source_distinct_keys",
+    "distinct_target_distinct_keys",
+    "distinct_effective_option_distinct_keys",
+    "distinct_option_value_distinct_keys",
+    "distinct_toolchain_distinct_keys",
+    "distinct_variant_set_distinct_keys",
+    "no_false_merge_full_workload",
+    "handles_edge_schema",
+    "many_distinct_specs_pairwise_distinct",
+    "candidate_false_merge",
+    "anti_cheat_forbidden_edit",
+    "forbidden_framework_or_harness_reference",
+]
+
+[loop]
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+mode = "baked"
+feedback_surface = "/opt/loop/submit.sh"
+# single-submission — min=max=1; the first
+# `bash /opt/loop/submit.sh` IS the final graded submission (submit == finalize).
+declared_submission_policy = "single_submission"

@@ -1,0 +1,57 @@
+# wro-causal-delivery-vclock-coupled — CROSS.CORRECTNESS.PROTOCOL / CROSS.CORRECTNESS.STATE_MACHINE
+# Long-horizon acceleration task (coupled multi-file scope).
+# gated_oracle via dual-emit. Score relation: noop ~= 0.5+eps; oracle = 1.0.
+
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wro-causal-delivery-vclock-coupled"
+bench = "lh"
+kind = "performance"
+language = "python"
+title = "This repository powers the delivery layer of a causal-broadcast messaging system."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wro-causal-delivery-vclock-coupled-loop16:v3@sha256:c6cf883b625d6b7a890403a9300474f519c44e8092ea988cc1a054aaad04d49f
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/lh-causal-delivery-vclock:oss .`
+[environment]
+docker_image = "fai/lh-causal-delivery-vclock:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 16384
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "acceleration"
+contract_pattern = "multi_file_scope"
+candidate_source_root = "/app/repo"
+primary_edit_paths = ["causal/buffer.py", "causal/channel.py"]
+forbidden_edit_paths = ["*"]
+result_paths = ["/logs/verifier"]
+
+# 🔴 换硬件/换环境要重测锚点。本题 gpus = 0,ref_speedup 在**作者的 CPU 通道
+#    (Intel Sapphire Rapids)**上标定;单核吞吐差异大的机器上比值会偏。换机器时:
+#    按 tests/verifier-correctness-manifest.json 的 recalibrate_howto,用本题包的
+#    oracle.patch 在本机重新标定 ref_speedup(建议 >=3 次取中位数),再计分。
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+noop_value = 1.0
+ref_speedup = 187.500717
+ref_speedup_source = "tests/verifier-correctness-manifest.json"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+[loop]
+min_submissions = 1
+max_submissions = 16
+submit = "bash /opt/loop/submit.sh"

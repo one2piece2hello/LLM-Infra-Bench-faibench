@@ -1,0 +1,26 @@
+--- a/megatron/core/transformer/moe/moe_utils.py
++++ b/megatron/core/transformer/moe/moe_utils.py
+@@ -656,16 +656,13 @@
+     num_ones = routing_map.sum(dim=1)
+     num_to_pad = (-num_ones) % pad_multiple
+ 
+-    # Find the positions of zeros in each row and pad the earliest ones.
+-    num_experts_t, num_tokens_t = routing_map.shape
+-    for e in range(num_experts_t):
+-        pad_e = int(num_to_pad[e])
+-        count = 0
+-        for t in range(num_tokens_t):
+-            if routing_map[e, t] == 0:
+-                count += 1
+-                if count <= pad_e:
+-                    routing_map[e, t] = 1
++    # Find the positions of zeros in each row and their ranks
++    is_zero = routing_map == 0
++    zero_ranks = torch.cumsum(is_zero.int(), dim=1)
++
++    # Create mask for elements that need to be padded (converted from 0 to 1)
++    mask = zero_ranks <= num_to_pad.unsqueeze(1)
++    routing_map[mask] = 1
+ 
+     routing_map = routing_map.transpose(0, 1)
+     return routing_map

@@ -1,0 +1,1 @@
+{"ref_speedup": 10.28458, "perf_metric": "speedup", "reward_kind": "gated_oracle", "calibrated_on": "H20 64x4096x8192 2:4 semi-structured sparse matmul; measured oracle raw speedup vs degraded dense-scatter+dense-matmul baseline"}

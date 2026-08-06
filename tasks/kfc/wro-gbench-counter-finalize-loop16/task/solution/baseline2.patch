@@ -1,0 +1,60 @@
+diff --git a/bench_counter.py b/bench_counter.py
+index 05f2ebd..a56ce6f 100644
+--- a/bench_counter.py
++++ b/bench_counter.py
+@@ -23,10 +23,6 @@ in this fixed sequence to each counter's raw value ``v``):
+ value per row) and broadcast across that benchmark's counters. The result is a
+ ``float64`` array of shape ``(B, C)``.
+ """
+-# DEGRADED_BASELINE_SCALAR_LOOP: correct but slow reference finalization -- an
+-# explicit per-(benchmark, counter) Python loop that reads each raw value out of
+-# the numpy table one cell at a time and applies the five flag transforms with
+-# scalar Python branches. Behaviour-equivalent to the vectorized form; just slow.
+ import numpy as np
+ 
+ kIsRate = 1 << 0
+@@ -53,26 +49,21 @@ def finalize_counters(values, flags, iterations, cpu_time, num_threads):
+     if vals.ndim != 2 or fl.shape != vals.shape:
+         raise ValueError("values and flags must both have shape (B, C)")
+     B, C = vals.shape
+-    it = np.asarray(iterations, dtype=np.float64)
+-    ct = np.asarray(cpu_time, dtype=np.float64)
+-    nt = np.asarray(num_threads, dtype=np.float64)
+-    out = np.empty((B, C), dtype=np.float64)
+-    for b in range(B):
+-        it_b = float(it[b])
+-        ct_b = float(ct[b])
+-        nt_b = float(nt[b])
+-        for c in range(C):
+-            v = float(vals[b, c])
+-            f = int(fl[b, c])
+-            if f & kIsRate:
+-                v = v / ct_b
+-            if f & kAvgThreads:
+-                v = v / nt_b
+-            if f & kIsIterationInvariant:
+-                v = v * it_b
+-            if f & kAvgIterations:
+-                v = v / it_b
+-            if f & kInvert:
+-                v = 1.0 / v
+-            out[b, c] = v
+-    return out
++    it = np.asarray(iterations, dtype=np.float64).reshape(-1, 1)
++    ct = np.asarray(cpu_time, dtype=np.float64).reshape(-1, 1)
++    nt = np.asarray(num_threads, dtype=np.float64).reshape(-1, 1)
++    # The four scaling transforms are vectorized across the whole table, but the
++    # final inversion is resolved with an explicit Python loop over the flattened
++    # table instead of a vectorized mask -- correct, and between the fully-scalar
++    # and fully-vectorized forms in speed.
++    v = vals.copy()
++    v = np.where((fl & kIsRate) != 0, v / ct, v)
++    v = np.where((fl & kAvgThreads) != 0, v / nt, v)
++    v = np.where((fl & kIsIterationInvariant) != 0, v * it, v)
++    v = np.where((fl & kAvgIterations) != 0, v / it, v)
++    flat = v.ravel().tolist()
++    fflat = fl.ravel().tolist()
++    for i in range(len(flat)):
++        if fflat[i] & kInvert:
++            flat[i] = 1.0 / flat[i]
++    return np.array(flat, dtype=np.float64).reshape(B, C)

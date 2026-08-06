@@ -1,0 +1,119 @@
+{
+ "name": "d1_varlen_prefill_public_dev_v1",
+ "edges": [
+  {
+   "case_id": "d_e1_small",
+   "seq_lens": [
+    1,
+    64,
+    130
+   ],
+   "num_q_heads": 32,
+   "num_kv_heads": 8,
+   "head_size": 128,
+   "dtype": "bfloat16",
+   "seed": 5001
+  },
+  {
+   "case_id": "d_e2_zero_and_tiny",
+   "seq_lens": [
+    0,
+    33,
+    2
+   ],
+   "num_q_heads": 32,
+   "num_kv_heads": 8,
+   "head_size": 128,
+   "dtype": "bfloat16",
+   "seed": 5002
+  },
+  {
+   "case_id": "d_e3_hd64",
+   "seq_lens": [
+    61,
+    100
+   ],
+   "num_q_heads": 16,
+   "num_kv_heads": 2,
+   "head_size": 64,
+   "dtype": "bfloat16",
+   "seed": 5003
+  }
+ ],
+ "cases": [
+  {
+   "case_id": "d1_uniform_1024x8",
+   "seq_lens": [
+    1024,
+    1024,
+    1024,
+    1024,
+    1024,
+    1024,
+    1024,
+    1024
+   ],
+   "num_q_heads": 32,
+   "num_kv_heads": 8,
+   "head_size": 128,
+   "dtype": "bfloat16",
+   "seed": 5011
+  },
+  {
+   "case_id": "d2_ragged_12",
+   "seq_lens": [
+    1500,
+    700,
+    300,
+    2000,
+    900,
+    1100,
+    400,
+    1700,
+    600,
+    1300,
+    200,
+    800
+   ],
+   "num_q_heads": 32,
+   "num_kv_heads": 8,
+   "head_size": 128,
+   "dtype": "bfloat16",
+   "seed": 5012
+  },
+  {
+   "case_id": "d3_short_24",
+   "seq_lens": [
+    300,
+    300,
+    300,
+    300,
+    300,
+    300,
+    300,
+    300,
+    300,
+    300,
+    300,
+    300,
+    300,
+    300,
+    300,
+    300,
+    300,
+    300,
+    300,
+    300,
+    300,
+    300,
+    300,
+    300
+   ],
+   "num_q_heads": 32,
+   "num_kv_heads": 8,
+   "head_size": 128,
+   "dtype": "bfloat16",
+   "seed": 5013
+  }
+ ]
+}

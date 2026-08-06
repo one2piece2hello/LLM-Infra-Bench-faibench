@@ -1,0 +1,125 @@
+diff --git a/accept_compact.py b/accept_compact.py
+--- a/accept_compact.py
++++ b/accept_compact.py
+@@ -210,4 +210,120 @@
+ 
+     No input array is modified.
+     """
+-    raise NotImplementedError("_accept_core is not implemented yet")
++    ai = accept_index
++    if (not isinstance(ai, np.ndarray) or ai.ndim != 2 or ai.dtype != np.int64):
++        raise ValueError("accept_index must be a 2-D int64 ndarray")
++    bs = int(ai.shape[0])
++    width = int(ai.shape[1])
++    if bs < 1 or bs > MAX_BS:
++        raise ValueError("bs out of range")
++    if width < 1 or width > MAX_WIDTH:
++        raise ValueError("width out of range")
++    r2t = req_to_token
++    if (not isinstance(r2t, np.ndarray) or r2t.ndim != 2 or r2t.dtype != np.int64
++            or r2t.shape[0] < 1 or r2t.shape[1] < 1):
++        raise ValueError("req_to_token must be a non-empty 2-D int64 ndarray")
++    pool_len = int(r2t.shape[1])
++    for nm, arr in (("req_pool_indices", req_pool_indices), ("seq_lens", seq_lens),
++                    ("num_correct_drafts", num_correct_drafts)):
++        if (not isinstance(arr, np.ndarray) or arr.ndim != 1
++                or arr.dtype != np.int64 or arr.shape[0] != bs):
++            raise ValueError(nm + " must be a 1-D int64 ndarray of shape (bs,)")
++    ocl = out_cache_loc
++    if (not isinstance(ocl, np.ndarray) or ocl.ndim != 1 or ocl.dtype != np.int64
++            or ocl.shape[0] < 1):
++        raise ValueError("out_cache_loc must be a non-empty 1-D int64 ndarray")
++    rpi_l = req_pool_indices.tolist()
++    sl_l = seq_lens.tolist()
++    ncd_l = num_correct_drafts.tolist()
++    ocl_l = ocl.tolist()
++    n_rows = int(r2t.shape[0])
++    for v in rpi_l:
++        if v < 0 or v >= n_rows:
++            raise ValueError("req_pool_indices out of range")
++    for v in sl_l:
++        if v < 0:
++            raise ValueError("seq_lens must be non-negative")
++    for v in ncd_l:
++        if v < 0:
++            raise ValueError("num_correct_drafts must be non-negative")
++    acc_l = [int(v) + 1 for v in ncd_l]
++    for k in range(bs):
++        if acc_l[k] > width:
++            raise ValueError("accepted run does not fit in the accept table")
++        if sl_l[k] + acc_l[k] > pool_len:
++            raise ValueError("destination slice does not fit in the page-table row")
++    ai_l = ai.tolist()
++    n_scratch = len(ocl_l)
++    for row in ai_l:
++        for v in row:
++            if v < -1 or v >= n_scratch:
++                raise ValueError("accept_index out of range")
++    if accept_tokens is not None:
++        if (not isinstance(accept_tokens, np.ndarray)
++                or accept_tokens.dtype != np.int64 or accept_tokens.shape != ai.shape):
++            raise ValueError("accept_tokens must be an int64 array shaped like accept_index")
++    if unfinished_index is not None:
++        if (not isinstance(unfinished_index, np.ndarray) or unfinished_index.ndim != 1
++                or unfinished_index.dtype != np.int64):
++            raise ValueError("unfinished_index must be a 1-D int64 ndarray")
++        for v in unfinished_index.tolist():
++            if v < 0 or v >= bs:
++                raise ValueError("unfinished_index out of range")
++    if kv_cache is not None:
++        if (not isinstance(kv_cache, np.ndarray) or kv_cache.ndim != 2
++                or kv_cache.dtype != np.float32 or kv_cache.shape[0] < 1
++                or kv_cache.shape[1] < 1):
++            raise ValueError("kv_cache must be a non-empty 2-D float32 ndarray")
++        n_pool = int(kv_cache.shape[0])
++        for v in ocl_l:
++            if v < 0 or v >= n_pool:
++                raise ValueError("out_cache_loc out of range for kv_cache")
++
++    n_move = 0
++    for v in acc_l:
++        n_move += v
++    tgt_l = [0] * (bs * width)
++    cursor = 0
++    for j in range(bs):
++        row = r2t[rpi_l[j]]
++        start = sl_l[j]
++        for t in range(acc_l[j]):
++            tgt_l[cursor] = int(row[start + t])
++            cursor += 1
++    aoc_l = [0] * (bs * width)
++    n_accept = 0
++    for j in range(bs):
++        for v in ai_l[j]:
++            if v != -1:
++                aoc_l[n_accept] = int(ocl_l[v])
++                n_accept += 1
++    seq_lens_next = np.asarray([sl_l[j] + acc_l[j] for j in range(bs)], dtype=np.int64)
++    if unfinished_index is None:
++        filt = None
++    else:
++        f_l = [0] * bs
++        for v in unfinished_index.tolist():
++            f_l[int(v)] = acc_l[int(v)]
++        filt = np.asarray(f_l, dtype=np.int64)
++    if accept_tokens is None:
++        bonus = None
++    else:
++        at_l = accept_tokens.tolist()
++        bonus = np.asarray([int(at_l[j][acc_l[j] - 1]) for j in range(bs)],
++                           dtype=np.int64)
++    if kv_cache is None:
++        kv_out = None
++    else:
++        n_pool = int(kv_cache.shape[0])
++        for p in range(n_move):
++            if tgt_l[p] < 0 or tgt_l[p] >= n_pool:
++                raise ValueError("planned destination out of range for kv_cache")
++        kv_out = np.array(kv_cache, dtype=np.float32)
++        for p in range(n_move):
++            kv_out[tgt_l[p]] = kv_cache[aoc_l[p]]
++    return {"tgt_cache_loc": np.asarray(tgt_l, dtype=np.int64),
++            "accept_out_cache_loc": np.asarray(aoc_l, dtype=np.int64),
++            "n_move": int(n_move), "n_accept": int(n_accept),
++            "seq_lens_next": seq_lens_next, "num_accept_tokens_filter": filt,
++            "bonus_tokens": bonus, "kv_cache": kv_out}

@@ -1,0 +1,53 @@
+diff --git a/torchtitan/models/common/moe.py b/torchtitan/models/common/moe.py
+index 8442b86..4c31675 100644
+--- a/torchtitan/models/common/moe.py
++++ b/torchtitan/models/common/moe.py
+@@ -451,7 +451,7 @@ class MoE(Module):
+         # DTensor runs it as a local op with no redistribution.
+         routing_map_BLE = torch.zeros_like(scores_BLE, dtype=torch.bool).scatter_(
+             -1,
+-            topk_expert_ids_BLK[..., :1],
++            topk_expert_ids_BLK,
+             True,
+         )
+         num_local_tokens_per_expert_E = routing_map_BLE.sum(dim=(0, 1))
+@@ -462,7 +462,7 @@ class MoE(Module):
+         #       first in the forward pass, and then in the backward pass. However, this has no
+         #       effect on the expert bias update thanks to the torch.sign() operator.
+         with torch.no_grad():
+-            self.tokens_per_expert_E.copy_(num_local_tokens_per_expert_E)
++            self.tokens_per_expert_E.add_(num_local_tokens_per_expert_E)
+ 
+         out_BLD = self.experts(
+             x_BLD,
+diff --git a/torchtitan/models/gpt_oss/moe.py b/torchtitan/models/gpt_oss/moe.py
+index 9dcc696..a429766 100644
+--- a/torchtitan/models/gpt_oss/moe.py
++++ b/torchtitan/models/gpt_oss/moe.py
+@@ -65,12 +65,13 @@ class ScaleBiasForward(torch.autograd.Function):
+ 
+ 
+ def swiglu(x, alpha: float = 1.702, limit: float = 7.0):
+-    _half = x.shape[-1] // 2
+-    x_glu, x_linear = x[..., :_half], x[..., _half:]
+-    x_glu = x_glu.clamp(min=-limit, max=limit)
++    x_glu, x_linear = x[..., ::2], x[..., 1::2]
++    # Clamp the input values
++    x_glu = x_glu.clamp(min=None, max=limit)
+     x_linear = x_linear.clamp(min=-limit, max=limit)
+     out_glu = x_glu * torch.sigmoid(alpha * x_glu)
+-    return out_glu * x_linear
++    # Note we add an extra bias of 1 to the linear layer
++    return torch.addcmul(out_glu, out_glu, x_linear)
+ 
+ 
+ class GptOssGroupedExperts(Module):
+@@ -186,7 +187,7 @@ class GptOssGroupedExperts(Module):
+             num_tokens_per_expert_long, dim=0, output_size=x_RD.shape[0]
+         )
+         b2_RD = ScaleBiasForward.apply(b2_RD, tp_degree, h_RD.dtype)
+-        return h_RD
++        return h_RD + b2_RD
+ 
+     def forward(
+         self,

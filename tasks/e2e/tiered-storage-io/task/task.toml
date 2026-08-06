@@ -1,0 +1,66 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "tiered-storage-io"
+bench = "e2e"
+kind = "implementation"
+language = "python"
+title = "正确性任务：分层存储引擎与跨层一致性（tiered storage I/O）"
+ext_id = "correctness-e2e-e5-tiered-storage-io"
+difficulty = "hard"
+category = "correctness"
+lane = "e2e_task"
+family = "impl_class"
+midtopic = "E5"
+author = "fai-bench"
+tags = [
+    "CROSS.STORAGE.TIERED",
+    "CROSS.STORAGE.TRANSFER",
+    "CROSS.STORAGE.CONSISTENCY",
+    "tiered-storage",
+    "lru-eviction",
+    "resumable-transfer",
+]
+description = "Implement a tiered storage engine: size-bounded hot tier over a durable cold tier, LRU/size-driven eviction (seaweedfs/rocketmq/kafka-tiering style), resumable segmented transfer with integrity re-fetch (AOF-manifest/minio-reconstruct style), coalesced cold-miss fetch, and all-or-nothing batched eviction (etcd-compaction style). Binary reward: 1.0 only if EVERY case in the hidden six-axis set (incl. real concurrency cases) passes and no cheat/gate trips, else 0.0."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 21600
+
+# OPEN-SOURCE: build from this task package (no private registry):
+#   cd <this-dir>/task && docker build -f environment/Dockerfile -t fai/e5-tiered-storage-io:oss .
+# (original private prebuilt image, provenance only: <internal registry>/kernelbench/correctness-e2e-e5-tiered-storage-io-val:v1@sha256:9b9d1cb031c5feb133222fe2f02adb96a5ddddc3f0f66682d0e65b1a98365570)
+[environment]
+docker_image = "fai/e5-tiered-storage-io:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 0
+storage_mb = 16384
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timeout_sec = 1800
+task_kind = "correctness"
+primary_edit_paths = ["submission/tiered_store.py"]
+forbidden_edit_paths = ["tests/test.sh", "tests/workload.py", "/opt/verifier"]
+result_paths = [
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+    "/logs/verifier/benchmark_results.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/verifier_state.json",
+]
+
+[primary_metric]
+# BINARY (reward.md 实现类): reward = 1.0 iff all graded cases pass and no cheat/gate trip, else 0.0.
+name = "correctness"
+goal = "maximize"
+source = "/logs/verifier/reward.json"
+calibrated_on = "Intel Sapphire Rapids CPU lane"

@@ -1,0 +1,196 @@
+diff --git a/caching_allocator.py b/caching_allocator.py
+index b1a6308..aad5824 100644
+--- a/caching_allocator.py
++++ b/caching_allocator.py
+@@ -52,16 +52,16 @@ freed-then-alloc'd same-size request creates ZERO new device buffers; the bytes
+ resident on the device (live + cached) never exceed ``capacity``; a whole-cache
+ eviction happens only when a new allocation would otherwise exceed ``capacity``.
+ 
+-Why the current implementation is slow
+---------------------------------------
+-Every freed buffer is dropped into a SINGLE flat list. To serve ``alloc(size)`` the
+-code LINEAR-SCANS that whole list looking for a buffer whose size equals the
+-request. When many buffers of many different sizes are pooled at once, each alloc
+-walks past a long run of wrong-size buffers before it finds a match (or gives up
+-and allocates), so the lookup cost grows with the number of pooled buffers. Make
+-the lookup faster — do fewer per-buffer comparisons for the same decisions — for
+-example by organizing the pooled buffers so a request of a given size goes straight
+-to the buffers of that size instead of scanning every pooled buffer.
++Implementation
++--------------
++Two dicts carry all the bookkeeping:
++  * ``self._live``: handle -> size for every currently-handed-out buffer, and
++  * ``self._free``: size -> stack (list) of cached handles of exactly that size.
++A size-exact lookup is one dict access plus a list pop — O(1) regardless of how
++many buffers are pooled — and ``free`` recovers the size and the liveness check
++from a single ``_live.pop``. Whole-cache eviction walks ``_free`` once, batching
++the byte and counter updates (the totals are identical to freeing one by one).
++Hot paths cache bound methods on the instance to avoid repeated attribute lookups.
+ 
+ Note on allowed operations
+ --------------------------
+@@ -82,92 +82,106 @@ def _check_positive_int(name, value):
+ class CachingAllocator:
+     """See the module docstring for the full contract.
+ 
+-    Naive reference container: pooled buffers live in one flat list and every
+-    ``alloc`` scans the entire list for a size-exact match. Correct, but the lookup
+-    work grows linearly with the number of pooled buffers.
++    ``self._live`` maps handle -> size for live buffers; ``self._free`` maps each
++    buffer size to a stack (list) of the handles of that size currently cached.
+     """
+ 
++    __slots__ = (
++        "capacity", "_device_bytes", "_next_handle", "_live", "_free",
++        "device_free_count", "eviction_count", "decisions",
++        "_free_get", "_live_setitem", "_live_pop", "_decisions_append",
++    )
++
+     def __init__(self, capacity=1_000_000_000):
+         _check_positive_int("capacity", capacity)
+-        self.capacity = int(capacity)
++        self.capacity = capacity
+         # device model (a stub: the "device" ops are just counters + a byte total)
+         self._device_bytes = 0        # bytes resident on the device (live + cached)
+         self._next_handle = 0
+-        self._size_of = {}            # handle -> size, for every device-resident buffer
+-        self._live = set()            # handles currently handed out
+-        # NAIVE pool: a single flat list of cached (freed) buffers as (handle, size)
+-        # pairs. alloc LINEAR-SCANS this whole list to find a size-exact match.
+-        self._free = []               # list[(handle, size)]
++        self._live = {}               # handle -> size, for live buffers
++        self._free = {}               # size -> stack of cached handles of that size
+         # observable counters / decision log
+-        self.device_alloc_count = 0
+         self.device_free_count = 0
+         self.eviction_count = 0
+-        self.reuse_count = 0
+         self.decisions = []
+-
+-    # --- device stub: the "expensive" operations we are modelling ---
+-    def _device_alloc(self, size):
+-        handle = self._next_handle
+-        self._next_handle += 1
+-        self._size_of[handle] = size
+-        self._device_bytes += size
+-        self.device_alloc_count += 1
+-        return handle
+-
+-    def _device_free(self, handle):
+-        self._device_bytes -= self._size_of[handle]
+-        del self._size_of[handle]
+-        self.device_free_count += 1
++        # bound-method caches for the hot paths (the underlying containers are
++        # never rebound, so these stay valid for the life of the object)
++        self._free_get = self._free.get
++        self._live_setitem = self._live.__setitem__
++        self._live_pop = self._live.pop
++        self._decisions_append = self.decisions.append
++
++    # ``decisions`` holds one entry per alloc, so the two alloc-side counters are
++    # derived from it exactly instead of being stored and bumped on every call.
++    @property
++    def reuse_count(self):
++        return self.decisions.count("reuse")
++
++    @property
++    def device_alloc_count(self):
++        return len(self.decisions) - self.decisions.count("reuse")
+ 
+     def _evict_cache(self):
+         # Return EVERY cached buffer to the device (reclaiming its bytes) and empty
+         # the pool. Triggered only when a new allocation would exceed capacity.
+-        for handle, _size in self._free:
+-            self._device_free(handle)
+-        self._free = []
++        nbufs = 0
++        nbytes = 0
++        for size, handles in self._free.items():
++            n = len(handles)
++            nbufs += n
++            nbytes += size * n
++        self._device_bytes -= nbytes
++        self.device_free_count += nbufs
++        self._free.clear()
+         self.eviction_count += 1
+ 
+-    def _find_cached(self, size):
+-        # NAIVE lookup: scan the whole flat pool for a size-exact match.
+-        for i in range(len(self._free)):
+-            handle, bsize = self._free[i]
+-            if bsize == size:
+-                del self._free[i]
+-                return handle
+-        return None
+-
+     def alloc(self, size):
+-        _check_positive_int("size", size)
+-        size = int(size)
+-        handle = self._find_cached(size)
+-        if handle is not None:
+-            self._live.add(handle)
+-            self.reuse_count += 1
+-            self.decisions.append("reuse")
++        if type(size) is not int and (
++                isinstance(size, bool) or not isinstance(size, int)):
++            raise TypeError(f"size must be an int, got {type(size).__name__}")
++        if size < 1:
++            raise ValueError(f"size must be >= 1, got {size}")
++        bucket = self._free_get(size)
++        if bucket:
++            handle = bucket.pop()
++            self._live_setitem(handle, size)
++            self._decisions_append("reuse")
+             return handle
+         # cache miss -> a new device buffer is required
+         if self._device_bytes + size > self.capacity:
+             self._evict_cache()
+-        if self._device_bytes + size > self.capacity:
+-            raise MemoryError(
+-                f"out of device capacity: need {size}, "
+-                f"{self.capacity - self._device_bytes} free")
+-        handle = self._device_alloc(size)
+-        self._live.add(handle)
+-        self.decisions.append("new")
++            if self._device_bytes + size > self.capacity:
++                raise MemoryError(
++                    f"out of device capacity: need {size}, "
++                    f"{self.capacity - self._device_bytes} free")
++        handle = self._next_handle
++        self._next_handle = handle + 1
++        self._live_setitem(handle, size)
++        self._device_bytes += size
++        self._decisions_append("new")
+         return handle
+ 
+     def free(self, handle, cacheable=True):
+-        if handle not in self._live:
+-            raise KeyError(f"handle {handle!r} is not a live buffer")
+-        self._live.discard(handle)
++        try:
++            size = self._live_pop(handle)
++        except KeyError:
++            raise KeyError(f"handle {handle!r} is not a live buffer") from None
+         if cacheable:
+-            self._free.append((handle, self._size_of[handle]))
++            bucket = self._free_get(size)
++            if bucket is None:
++                self._free[size] = [handle]
++            else:
++                bucket.append(handle)
+         else:
+-            self._device_free(handle)
++            self._device_bytes -= size
++            self.device_free_count += 1
+ 
+     def live_sizes(self):
+-        return sorted(self._size_of[h] for h in self._live)
++        return sorted(self._live.values())
+ 
+     def cached_sizes(self):
+-        return sorted(size for _handle, size in self._free)
++        out = []
++        for size, handles in self._free.items():
++            out.extend([size] * len(handles))
++        out.sort()
++        return out

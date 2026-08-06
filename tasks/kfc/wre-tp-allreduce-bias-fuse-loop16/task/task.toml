@@ -1,0 +1,51 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wre-tp-allreduce-bias-fuse-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "submission/kernel.py ships a required function reduce_partials whose body is not implemented (it raises NotImplementedError)."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wre-tp-allreduce-bias-fuse-loop16:v1@sha256:44dc9499f9f5e1050e4676b41f8bc6962c0d78195eba7cdfa64f32056043f8f6
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wre-tp-allreduce-bias-fuse-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wre-tp-allreduce-bias-fuse-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 49152
+gpus = 1
+# H20 只是**锚点标定用卡**,不是硬性限制。换卡时:①按 tests/ref_speedup.caveat.md 重标锚点;
+#   ②用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像。
+gpu_types = ["H20"]
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timing_metric = "speedup"
+primary_edit_paths = ["submission/kernel.py"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+reward_formula = "min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0; measured metric is vs_oracle = speedup/ref_speedup; ref_speedup from tests/ref_speedup.txt; 0 on any hard gate, speedup<=1 or ref_speedup<=1"
+ref_speedup = 7.8501
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "NVIDIA H20"
+
+[loop]
+# NOTE: the /opt/loop harness baked into the image applies its own 3/16 in-session budget; for in-session loop scoring the image is authoritative.
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+declared_submission_policy = "single_submission"

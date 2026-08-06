@@ -1,0 +1,52 @@
+# 🔴 换硬件/换环境要重测锚点。本题 gpus = 0,ref_speedup 在**作者的 CPU 通道
+#    (Intel Sapphire Rapids)**上标定;单核吞吐差异大的机器上比值会偏。换机器时:
+#    按 tests/verifier-correctness-manifest.json 的 recalibrate_howto,用本题包的
+#    oracle.patch 在本机重新标定 ref_speedup(建议 >=3 次取中位数),再计分。
+
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wro-vllm-v1-priority-request-queue"
+bench = "lh"
+kind = "performance"
+language = "python"
+title = "A subsystem is the vLLM V1 scheduler priority request queue (serve ascending (priority, arrival_time, insertion-seq))."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wro-vllm-v1-priority-request-queue-loop16:v2imgclean@sha256:a435490398ebb88fc1bac6a26f4afd01dec2aab9e28b2e972b5c4cdb50e15512
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/lh-vllm-v1-priority-request-queue:oss .`
+[environment]
+docker_image = "fai/lh-vllm-v1-priority-request-queue:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "acceleration"
+contract_pattern = "kernelbench_generic_v1"
+primary_edit_paths = ["vllm/v1/core/sched/wro_priority_request_queue.py"]
+forbidden_edit_paths = ["*"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+ref_speedup = 312.0
+ref_speedup_source = "tests/verifier-correctness-manifest.json"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+[loop]
+min_submissions = 1
+max_submissions = 16
+submit = "bash /opt/loop/submit.sh"

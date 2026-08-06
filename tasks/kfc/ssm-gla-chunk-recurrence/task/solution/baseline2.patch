@@ -1,0 +1,163 @@
+diff --git a/gated_state_recurrence.py b/gated_state_recurrence.py
+index 5fefc9db..8e4d6ddd 100644
+--- a/gated_state_recurrence.py
++++ b/gated_state_recurrence.py
+@@ -1,72 +1,17 @@
+-"""Causal sequence mixer with a gated (decaying) running key-value state.
+-
+-Public entry point:
+-    ``gated_state_recurrence(q, k, v, g, initial_state=None,
+-                             output_final_state=False)``
+-
+-This layer mixes a sequence of tokens through a small running state matrix rather
+-than through pairwise attention. For each ``(batch, head)`` it maintains a state
+-matrix ``S`` of shape ``(Dk, Dv)`` that is updated one position at a time, left to
+-right (causal). What makes it expressive is a per-position, per-key-feature
+-multiplicative **gate**: before each new key/value pair is written, every row of
+-the state is scaled down by its own decay factor, so the state remembers recent
+-associations more strongly than old ones (a learned, per-feature forget rate).
+-
+-Contract
+---------
+-- ``q``, ``k``: shape ``(B, H, L, Dk)`` — per-position query and key. Same
+-  floating dtype (``torch.bfloat16`` or ``torch.float16``), CUDA tensors.
+-- ``v``: shape ``(B, H, L, Dv)`` — per-position value, same dtype/device.
+-- ``g``: shape ``(B, H, L, Dk)`` — per-position, per-key-feature gate in
+-  **log space**; the multiplicative decay applied to the state is ``exp(g)``
+-  (so ``g <= 0`` decays, ``g == 0`` keeps the state, very negative ``g`` nearly
+-  forgets it). Same dtype/device as ``q``.
+-- ``initial_state``: optional ``(B, H, Dk, Dv)`` starting state (same device;
+-  read in float32). ``None`` means a zero state.
+-- ``output_final_state``: if ``True`` also return the final state ``S``.
+-
+-Semantics (per ``(batch, head)``, state ``S`` of shape ``(Dk, Dv)``)::
+-
+-    scale = Dk ** -0.5
+-    S = initial_state (or zeros)                       # float32
+-    for t = 0 .. L-1:
+-        a_t = exp(g_t)                                 # (Dk,) per-feature decay
+-        S   = diag(a_t) @ S + outer(k_t, v_t)          # decay the state, then write
+-        o_t = (scale * q_t)^T S                        # query reads the updated state
+-
+-where ``diag(a_t) @ S`` scales row ``d`` of the state by ``a_t[d]``
+-(``S[d, m] <- a_t[d] * S[d, m]``), ``outer(k_t, v_t)[d, m] = k_t[d] * v_t[m]`` and
+-the query readout contracts ``Dk`` (``o_t[m] = sum_d scale * q_t[d] * S[d, m]``).
+-The gate scales the **carried state**, not the freshly written pair. The state and
+-the readout are accumulated in float32 for stability; the output is cast back to
+-the input dtype. The recurrence is strictly causal: ``o_t`` depends only on
+-positions ``<= t``.
+-
+-Returns
+--------
+-- ``o``: shape ``(B, H, L, Dv)``, dtype of ``q``.
+-- ``(o, final_state)`` when ``output_final_state`` is ``True`` — ``final_state``
+-  is ``(B, H, Dk, Dv)`` float32.
+-
+-Error contract
+---------------
+-- ``TypeError`` if any of ``q, k, v, g`` is not a floating (bfloat16/float16)
+-  ``torch.Tensor``, or their dtypes differ from ``q``.
+-- ``ValueError`` if ``q`` is not 4-D, ``k`` shape != ``q`` shape, ``g`` shape !=
+-  ``q`` shape, ``v`` is not ``(B, H, L, Dv)`` sharing ``(B, H, L)`` with ``q``, or
+-  ``initial_state`` (when given) is not ``(B, H, Dk, Dv)``.
+-
+-Note on allowed operations
+---------------------------
+-Third-party sequence-mixing / attention / state-recurrence library operators are
+-out of scope — the state recurrence is built here from primitive tensor
+-operations. The current implementation walks the sequence one position at a time
+-in Python: every position launches its own small GPU operations and each state
+-update must wait for the previous one, so the sequential dependency chain
+-dominates the runtime even though the per-position work is tiny.
++"""REVIEWER-ONLY baseline2 (soundness probe) for ssm-gla-chunk-recurrence.
++
++A CORRECT implementation that is mechanically DIFFERENT from the oracle: it uses
++the same chunk-parallel idea but a different block size (8 vs the oracle's 16) and
++expresses the block sweep with ``torch.einsum`` instead of the oracle's ``@``
++matmuls. It must earn a POSITIVE wall-time reward on its own merit; the verifier
++scores against the high-precision sequential goldens (never against the oracle's
++bytes), so any correct fast reformulation must be rewarded — if only the exact
++oracle code scored, the verifier would be oracle-overfit and must be fixed.
++Reviewer-only; NEVER baked into the image.
+ """
+ 
+ import torch
++import torch.nn.functional as F
+ 
+ 
+ def _validate(q, k, v, g, initial_state):
+@@ -98,34 +43,52 @@ def _validate(q, k, v, g, initial_state):
+ 
+ 
+ def gated_state_recurrence(q, k, v, g, initial_state=None, output_final_state=False):
+-    """See module docstring for the full contract.
+-
+-    Naive sequential reference: a Python loop over the L positions, each decaying
+-    the state by its per-feature gate, writing the current key/value outer product,
+-    and reading it back for the query. Correct but the per-position dependency
+-    chain makes it slow (many tiny launches, no reuse of the large matmul units).
+-    """
+     B, H, L, Dk, Dv = _validate(q, k, v, g, initial_state)
+     orig_dtype = q.dtype
+-    qf = q.to(torch.float32) * (Dk ** -0.5)
++    dev = q.device
++    C = 8  # distinct block size vs the oracle (16)
++    scale = Dk ** -0.5
++
++    qf = q.to(torch.float32)
+     kf = k.to(torch.float32)
+     vf = v.to(torch.float32)
+-    af = g.to(torch.float32).exp()                         # per-feature decay factor
+-
+-    S = torch.zeros(B, H, Dk, Dv, dtype=torch.float32, device=q.device)
++    gf = g.to(torch.float32)
++
++    pad = (-L) % C
++    if pad:
++        qf = F.pad(qf, (0, 0, 0, pad))
++        kf = F.pad(kf, (0, 0, 0, pad))
++        vf = F.pad(vf, (0, 0, 0, pad))
++        gf = F.pad(gf, (0, 0, 0, pad))
++    Lp = L + pad
++    n = Lp // C
++
++    def chunks(x):
++        return x.reshape(B, H, n, C, x.shape[-1])
++
++    qc, kc, vc, gc = chunks(qf), chunks(kf), chunks(vf), chunks(gf)
++    Gi = gc.cumsum(dim=-2)
++    q_tilde = (qc * scale) * Gi.exp()
++    k_tilde = kc * (-Gi).exp()
++    g_last = Gi[..., -1:, :]
++    k_hat = kc * (g_last - Gi).exp()
++
++    S = torch.zeros(B, H, Dk, Dv, dtype=torch.float32, device=dev)
+     if initial_state is not None:
+         S = S + initial_state.to(torch.float32)
+-    o = torch.empty(B, H, L, Dv, dtype=torch.float32, device=q.device)
+-
+-    for t in range(L):
+-        q_t = qf[:, :, t]                                  # (B, H, Dk)
+-        k_t = kf[:, :, t]                                  # (B, H, Dk)
+-        v_t = vf[:, :, t]                                  # (B, H, Dv)
+-        a_t = af[:, :, t].unsqueeze(-1)                    # (B, H, Dk, 1) decay
+-        S = a_t * S + k_t.unsqueeze(-1) * v_t.unsqueeze(-2)  # decay, then write outer(k, v)
+-        o[:, :, t] = (q_t.unsqueeze(-1) * S).sum(dim=-2)   # query readout of updated state
+-
+-    o = o.to(orig_dtype)
++    o = torch.zeros(B, H, n, C, Dv, dtype=torch.float32, device=dev)
++    mask_strict = torch.triu(torch.ones(C, C, dtype=torch.bool, device=dev), diagonal=1)
++    for c in range(n):
++        qt = q_tilde[:, :, c]
++        kt = k_tilde[:, :, c]
++        a = torch.einsum("bhid,bhjd->bhij", qt, kt).masked_fill(mask_strict, 0.0)
++        o_intra = torch.einsum("bhij,bhjd->bhid", a, vc[:, :, c])
++        o_inter = torch.einsum("bhid,bhde->bhie", qt, S)
++        o[:, :, c] = o_inter + o_intra
++        gl = g_last[:, :, c, 0, :]
++        S = gl.exp().unsqueeze(-1) * S + torch.einsum("bhid,bhie->bhde", k_hat[:, :, c], vc[:, :, c])
++
++    o = o.reshape(B, H, Lp, Dv)[:, :, :L].to(orig_dtype)
+     if output_final_state:
+         return o, S
+     return o

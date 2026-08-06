@@ -1,0 +1,31 @@
+{
+  "schema_version": "kernelbench_correctness_manifest_v1",
+  "task_id": "insea-fused-softmax-cross-entropy-grad-loop16",
+  "task_kind": "acceleration",
+  "expected_case_count": 12,
+  "primary_workload": "ce-peakmem-geomean-4shapes",
+  "ref_speedup": 1.0,
+  "ref_speedup_note": "Anchor 7.4157 calibrated in oracle mode on NVIDIA H20. tests/ref_speedup.txt is authoritative at scoring; this file is only the in-image fallback. See tests/ref_speedup.caveat.md to re-measure on your hardware.",
+  "metric": "peak_memory_bytes",
+  "metric_note": "SCORE PEAK MEMORY, NOT WALL-TIME. speedup = torch.cuda.max_memory_allocated(baseline)/max_memory_allocated(candidate), geomean over 4 large-vocab shapes on H20. Latency may be ~1.0x — expected for a memory-frugal op (false-negative checklist item #2).",
+  "direction": "higher_is_better",
+  "target_hardware": "H20",
+  "correctness_axes": [
+    "normal",
+    "boundary",
+    "all_ignore",
+    "single_class",
+    "single_row",
+    "nontile_vocab",
+    "label_smoothing",
+    "degenerate",
+    "error",
+    "metamorphic",
+    "work_evidence",
+    "anti_hacking"
+  ],
+  "public_symbol": "cross_entropy_loss_grad",
+  "primary_edit_paths": [
+    "/app/repo/cross_entropy_grad.py"
+  ]
+}

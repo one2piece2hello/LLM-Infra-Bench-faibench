@@ -1,0 +1,31 @@
+{
+  "schema_version": "kernelbench_correctness_manifest_v1",
+  "task_id": "errorfeedback-sign-compress",
+  "task_kind": "acceleration",
+  "expected_case_count": 12,
+  "primary_workload": "sign-compress-bytes-geomean-4shapes",
+  "ref_speedup": 31.5,
+  "ref_speedup_note": "Anchor 31.7519 calibrated in oracle mode on NVIDIA H20. tests/ref_speedup.txt is authoritative at scoring; this file is only the in-image fallback. See tests/ref_speedup.caveat.md to re-measure on your hardware.",
+  "metric": "bytes_moved",
+  "direction": "higher_is_better",
+  "target_hardware": "H20",
+  "value_axis": "compressed_payload_bytes (device-independent; deterministic byte count of the transmitted representation)",
+  "correctness_axes": [
+    "roundtrip_shape_dtype",
+    "ef_consistency_normal",
+    "ef_consistency_residual",
+    "boundary_block_nonmultiple",
+    "boundary_all_same_sign",
+    "degenerate_all_zero",
+    "degenerate_single_outlier",
+    "error_dtype",
+    "error_shape",
+    "metamorphic_scale",
+    "multistep_conservation",
+    "multistep_unbiased_converge"
+  ],
+  "public_symbol": "compress",
+  "primary_edit_paths": [
+    "/app/repo/grad_compress.py"
+  ]
+}

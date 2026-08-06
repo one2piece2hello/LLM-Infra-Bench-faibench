@@ -1,0 +1,77 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "errorfeedback-sign-compress"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "You are working on the gradient-exchange path of a data-parallel training system that runs over a bandwidth-constrained network."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 21600
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/insea-errorfeedback-sign-compress-loop16:loop-20260720T111700Z@sha256:389c7ad395a4b1b6d03ff5f6d511bcea513bff3a5e78245c3c1159bc520bddff
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-errorfeedback-sign-compress:oss .`
+[environment]
+docker_image = "fai/kfc-errorfeedback-sign-compress:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32000
+gpus = 1
+# H20 只是**锚点标定用卡**,不是硬性限制。换卡时:①按 tests/ref_speedup.caveat.md 重标锚点;
+#   ②用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像。
+gpu_types = ["H20"]
+gpu_memory_gb = 96
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timeout_sec = 3600
+task_kind = "acceleration"
+contract_pattern = "A"
+timing_metric = "bytes_moved"
+candidate_source_root = "/app/repo"
+primary_edit_paths = ["/app/repo/grad_compress.py"]
+forbidden_edit_paths = ["/app/repo/tests/**", "/opt/verifier-*", "/tests/**", "/opt/loop/**"]
+result_paths = [
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+]
+
+[primary_metric]
+name = "sign_compress_bytes_speedup"
+goal = "maximize"
+metric_kind = "bytes_moved"
+reward_formula = "acceleration: reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0 — 0.5 at parity with the oracle, capped 1.0 at oracle^2; speedup = measured speedup (per-shape baseline_bytes/candidate_bytes, geomean over 4 gradient workload shapes); value axis is the compressed-payload bytes-moved, a deterministic device-independent count (a 1-bit sign payload + per-block fp32 scale moves ~1/32 the bytes of the full fp32 buffer). The 12-case hidden correctness suite (error-feedback identity, multi-step conservation + unbiased convergence, boundary/degenerate/error/metamorphic), anti-cheat (only grad_compress.py may change) and the framework-quantization-primitive ban are hard gates."
+ref_speedup = 31.7519
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "NVIDIA H20"
+correctness_gates = [
+    "hidden_parity_suite",
+    "ef_consistency",
+    "multistep_conservation",
+    "multistep_unbiased_converge",
+    "boundary_block_nonmultiple",
+    "degenerate_all_zero",
+    "error_reject",
+    "metamorphic_scale",
+    "trusted_restore",
+    "anti_cheat_forbidden_edit",
+    "forbidden_framework_quantize_primitive",
+]
+
+[loop]
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+mode = "baked"
+feedback_surface = "/opt/loop/submit.sh"

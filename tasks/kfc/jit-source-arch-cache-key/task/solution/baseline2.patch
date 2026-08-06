@@ -1,0 +1,88 @@
+diff --git a/identity_key.py b/identity_key.py
+index 9e2a701..f9c4328 100644
+--- a/identity_key.py
++++ b/identity_key.py
+@@ -1,57 +1,33 @@
+-"""Stable identity for a build-spec.
+-
+-Public entry point:
+-    ``identity_key(spec: dict) -> str``
+-
+-A downstream stage keeps a table of already-produced *identities* and skips the
+-expensive step for a build-spec whose identity it has already seen. So the identity
+-must satisfy two properties:
+-
+-* two specs that are **equivalent** (they describe the same build, differing only in
+-  incidental spelling) should map to the **same** identity, and
+-* two specs that are **genuinely different** must map to **different** identities -- a
+-  collision between two different specs would let the wrong prior artifact be reused,
+-  which is never acceptable.
+-
+-Build-spec shape
+-----------------
+-A spec is a mapping with:
+-
+-* ``"source"``: the source text (a string).
+-* ``"target"``: the target-profile tag (a string) the artifact is produced for.
+-* ``"options"`` (optional): a list of build-option tokens (an unordered set).
+-* ``"toolchain"`` (optional): the toolchain-version tag (a string).
+-* ``"variants"`` (optional): a list of requested variant names (an unordered set).
+-* ``"build"`` (optional): a mapping of incidental build annotations.
+-
+-This starting implementation is **correct but conservative**: it derives the identity
+-from the spec almost verbatim (only the field order of a mapping is neutralized). It
+-never merges two different specs, but specs that are merely spelled differently are
+-treated as separate identities, so the downstream table holds more entries than there
+-are truly distinct builds and the expensive step is repeated once per spelling.
+-Reducing the number of distinct identities -- without ever merging two genuinely
+-different specs -- is the goal.
++"""baseline2 for jit-source-arch-cache-key (reviewer-only; NOT baked in image).
++
++Same canonicalization SEMANTICS as the oracle (normalize source text, drop no-op
++options + de-dup + order-free, sort the variant set, drop build annotations, keep
++target profile + toolchain tag) but a DIFFERENT mechanism: build a canonical nested
++TUPLE and digest its ``repr`` with sha1, instead of the oracle's json + FNV-1a. It
++induces the same partition and the same identity count (~12) as the oracle -> the same
++speedup -- which proves the verifier scores the identity PARTITION, not a byte-match
++against oracle code.
+ """
+ 
+-import json
++import hashlib
++import re
+ 
++_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
++_LINE_COMMENT = re.compile(r"//[^\n]*")
++NOOP_OPTIONS = {"o0", "dbgoff", "std0"}
+ 
+-def _fnv1a_64(text):
+-    """Deterministic 64-bit FNV-1a digest of ``text`` (fixed, not process-salted)."""
+-    h = 0xCBF29CE484222325
+-    for byte in text.encode("utf-8"):
+-        h ^= byte
+-        h = (h * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+-    return format(h, "016x")
+ 
++def _canon_source(text):
++    text = _BLOCK_COMMENT.sub(" ", text or "")
++    text = _LINE_COMMENT.sub(" ", text)
++    return " ".join(text.split())
+ 
+-def identity_key(spec):
+-    """Return a stable string identity for ``spec``.
+ 
+-    Conservative baseline: serialize the spec with a fixed field order and digest it.
+-    Only mapping-field order is neutralized; every other incidental difference (source
+-    comments/whitespace, option order, redundant no-op options, annotation fields)
+-    still yields a new identity.
+-    """
+-    text = json.dumps(spec, sort_keys=True, separators=(",", ":"), default=repr)
+-    return _fnv1a_64(text)
++def identity_key(spec):
++    source = _canon_source(spec.get("source", ""))
++    target = spec.get("target")
++    toolchain = spec.get("toolchain")
++    options = tuple(sorted({o for o in (spec.get("options") or []) if o not in NOOP_OPTIONS}))
++    variants = tuple(sorted(spec.get("variants") or []))
++    canon = (source, target, toolchain, options, variants)
++    return hashlib.sha1(repr(canon).encode("utf-8")).hexdigest()

@@ -1,0 +1,11 @@
+--- a/torch_optimizer/yogi.py
++++ b/torch_optimizer/yogi.py
+@@ -136,7 +136,7 @@
+                 exp_avg_sq.addcmul_(
+                     torch.sign(exp_avg_sq - grad_squared),
+                     grad_squared,
+-                    value=-(1 - beta2),
++                    value=(1 - beta2),  # NEGATIVE known-bad: wrong-sign second-moment update
+                 )
+ 
+                 denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(

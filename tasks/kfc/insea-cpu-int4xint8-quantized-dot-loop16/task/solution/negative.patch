@@ -1,0 +1,27 @@
+--- a/blocked_dot.py
++++ b/blocked_dot.py
+@@ -66,15 +66,13 @@
+     _validate(u_blocks, v_blocks)
+     result = 0.0
+     for (su, packed), (sv, codes) in zip(u_blocks, v_blocks):
+-        combined = su * sv
+-        # one lane at a time: locate the byte holding this lane's code, pull out
+-        # that single code, scale the lane's integer product by the block factor,
+-        # and accumulate in the scaled domain (the redundant work this task removes).
+-        for j in range(32):
+-            byte = packed[j >> 1]
+-            if j & 1:
+-                code = ((byte >> 4) & 0xF) - 8
+-            else:
+-                code = (byte & 0xF) - 8
+-            result = result + (code * codes[j]) * combined
++        isum = 0
++        j = 0
++        for b in range(16):
++            byte = packed[b]
++            lo = (byte & 0xF)          # BUG: dropped the -8 offset (unsigned code)
++            hi = ((byte >> 4) & 0xF)   # BUG: dropped the -8 offset (unsigned code)
++            isum += lo * codes[j] + hi * codes[j + 1]
++            j += 2
++        result += (su * sv) * isum
+     return result

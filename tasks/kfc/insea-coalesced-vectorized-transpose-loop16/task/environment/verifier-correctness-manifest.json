@@ -1,0 +1,31 @@
+{
+  "schema_version": "kernelbench_correctness_manifest_v1",
+  "task_id": "insea-coalesced-vectorized-transpose-loop16",
+  "task_kind": "acceleration",
+  "expected_case_count": 10,
+  "primary_workload": "transpose-geomean-4shapes",
+  "ref_speedup": 1.0,
+  "ref_speedup_note": "Anchor 3.16 calibrated in oracle mode on NVIDIA H20. tests/ref_speedup.txt is authoritative at scoring; this file is only the in-image fallback. See tests/ref_speedup.caveat.md to re-measure on your hardware.",
+  "metric": "wall_time_ms",
+  "direction": "higher_is_better",
+  "target_hardware": "H20",
+  "value_axis": "achieved_global_memory_bandwidth (memory-bound; wall-time tracks it). gpu_bench.py prints achieved-GB/s per shape as work evidence. NOTE: the bytes moved are IDENTICAL for a coalesced vs a strided kernel, so a bytes-moved proxy alone cannot discriminate them — the scored metric MUST be wall-time / achieved bandwidth.",
+  "correctness_axes": [
+    "normal_square",
+    "normal_rect",
+    "boundary_nonmultiple",
+    "boundary_thin_row",
+    "boundary_thin_col",
+    "degenerate_1x1",
+    "normal_fp16",
+    "metamorphic_double_transpose",
+    "error_reject",
+    "hidden_skewed_fp16"
+  ],
+  "public_symbol": "transpose",
+  "candidate_translation_unit": "/app/repo/transpose_kernel.cu",
+  "primary_edit_paths": [
+    "/app/repo/transpose_kernel.cu"
+  ],
+  "compile_note": "transpose.py JIT-compiles transpose_kernel.cu with nvcc (torch cpp-extension) at scoring; a changed .cu forces a fresh recompile. Requires nvcc + CUDA headers (cuda_fp16.h, cuda_runtime.h) + ninja in the image (see the Dockerfile build notes); H20 = sm_90; -ccbin g++-11 fallback. No mma.h needed (this is data movement, not a matrix instruction)."
+}

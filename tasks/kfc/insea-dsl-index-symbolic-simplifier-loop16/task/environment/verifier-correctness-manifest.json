@@ -1,0 +1,31 @@
+{
+  "schema_version": "kernelbench_correctness_manifest_v1",
+  "task_id": "insea-dsl-index-symbolic-simplifier-loop16",
+  "task_kind": "acceleration",
+  "expected_case_count": 12,
+  "primary_workload": "index-expr-recombine-nodecount",
+  "ref_speedup": 1.0,
+  "ref_speedup_note": "Anchor 3.36 calibrated in oracle mode on the authoring CPU lane (Intel Sapphire Rapids). tests/ref_speedup.txt is authoritative at scoring; this file is only the in-image fallback. See tests/ref_speedup.caveat.md to re-measure on your hardware.",
+  "metric": "node_count",
+  "direction": "higher_is_better",
+  "target_hardware": "cpu (x86-64 Sapphire Rapids; pure-Python stdlib, timing-free node count -> fully deterministic and hardware-portable)",
+  "value_axis": "total AST node count of the simplified expression corpus; a fold-only pass leaves recombination idioms intact and emits more nodes than a full fixpoint rewriter",
+  "correctness_axes": [
+    "normal_recombine_pow2",
+    "normal_trivial_identities",
+    "normal_const_fold",
+    "boundary_single_var",
+    "boundary_range_width_1",
+    "degenerate_already_canonical",
+    "error_div_by_zero_const",
+    "error_unbounded_var",
+    "metamorphic_idempotent",
+    "metamorphic_value_equivalence_exhaustive",
+    "hidden_nonpow2_recombine",
+    "work_evidence_depends_on_var"
+  ],
+  "public_symbol": "simplify_expr",
+  "primary_edit_paths": [
+    "/app/repo/index_expr_simplify.py"
+  ]
+}

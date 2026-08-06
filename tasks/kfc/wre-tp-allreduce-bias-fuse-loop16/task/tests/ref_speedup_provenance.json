@@ -1,0 +1,5 @@
+{
+  "ref_speedup": 7.8501,
+  "derivation": "1/baseline2_vs_oracle=1/0.127387 (recorded 5-mode validation anchors)",
+  "meaning": "oracle speedup over the naive (baseline2) reference; the ref_speedup anchor. Derived from the RECORDED 5-mode validation anchors, not measured locally."
+}

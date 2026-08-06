@@ -1,0 +1,33 @@
+{
+  "schema_version": "kernelbench_correctness_manifest_v1",
+  "task_id": "size-binned-caching-allocator",
+  "task_kind": "acceleration",
+  "expected_case_count": 14,
+  "primary_workload": "caching-allocator-poolscan-Ir",
+  "ref_speedup": 1.0,
+  "ref_speedup_note": "Anchor 25.48631 calibrated in oracle mode on the authoring CPU lane (Intel Sapphire Rapids). tests/ref_speedup.txt is authoritative at scoring; this file is only the in-image fallback. See tests/ref_speedup.caveat.md to re-measure on your hardware.",
+  "metric": "callgrind_ir",
+  "direction": "higher_is_better",
+  "target_hardware": "cpu (x86-64 Sapphire Rapids; pure-Python stdlib -> no AVX-512 in hot path -> callgrind safe)",
+  "value_axis": "retired instruction count (Ir) for build+replay of an alloc/free stream against a large pool of many distinct-size freed buffers; a flat pool linear-scans every pooled buffer on each alloc to make its size-exact reuse decision",
+  "correctness_axes": [
+    "normal_reuse_same_size",
+    "normal_distinct_sizes_no_reuse",
+    "boundary_first_alloc_always_new",
+    "boundary_single_size_bucket",
+    "boundary_all_distinct_sizes",
+    "degenerate_all_same_size_one_devalloc",
+    "degenerate_noncacheable_no_pool",
+    "error_free_unknown_handle",
+    "error_bad_size_and_capacity",
+    "error_oom_after_evict",
+    "metamorphic_decisions_equal_reference",
+    "metamorphic_free_order_independence",
+    "hidden_interleaved_long_stream",
+    "work_evidence_devalloc_reduction"
+  ],
+  "public_symbol": "CachingAllocator",
+  "primary_edit_paths": [
+    "/app/repo/caching_allocator.py"
+  ]
+}

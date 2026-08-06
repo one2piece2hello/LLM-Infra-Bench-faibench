@@ -1,0 +1,128 @@
+diff --git a/vllm/v1/core/sched/wro_priority_request_queue.py b/vllm/v1/core/sched/wro_priority_request_queue.py
+index 1d5d556..8c640df 100644
+--- a/vllm/v1/core/sched/wro_priority_request_queue.py
++++ b/vllm/v1/core/sched/wro_priority_request_queue.py
+@@ -1,100 +1,56 @@
+ """Priority request queue for the vLLM V1 scheduler (host-logic scheduling).
+ 
+-The V1 scheduler orders waiting requests by a scheduling policy. Under the
+-PRIORITY policy, requests are served by ascending ``priority`` and, for equal
+-priority, ascending ``arrival_time`` (earlier first); exact ties are broken by
+-insertion order (FIFO) so the pop sequence is fully deterministic.
+-
+-``PriorityRequestQueue`` supports the scheduler's hot operations:
+-    add_request(req)      # enqueue
+-    peek_request()        # inspect the next-to-serve without removing
+-    pop_request()         # remove + return the next-to-serve
+-    remove_request(req)   # cancel a specific request
+-    __len__ / __bool__ / __iter__ (priority order)
+-
+-A request here is any object exposing ``.priority`` (int) and ``.arrival_time``
+-(float); the scheduler drains and refills this queue every scheduling step.
+-
+-This class sits directly on the scheduler's per-step hot path: it is drained and
+-refilled on every scheduling iteration, so the cost of ``peek_request`` /
+-``pop_request`` / ``remove_request`` is paid once per waiting request per step.
+-Under a large waiting set the host time spent inside this class dominates the
+-scheduler's per-step cost, and reducing it is what this file is measured on.
+-
+-The internal representation used by ``PriorityRequestQueue`` is an
+-implementation detail and may be replaced freely, as long as every public method
+-keeps its documented signature and the enqueue/dequeue ORDER contract above
+-holds for every possible interleaving of the operations listed above. The pop
+-ORDER is part of the observable contract; nothing else about the class is.
+-
+-Editable scope: THIS FILE ONLY. Any change must live inside
+-``PriorityRequestQueue`` or in helpers added to this module. The enqueue/dequeue
+-ORDER contract (ascending priority, then arrival_time, then FIFO) is the
+-correctness spec and must be preserved exactly.
++Reference implementation of this module. The pop ORDER contract (ascending
++``(priority, arrival_time, insertion-seq)``) is preserved exactly; only the
++module-internal bookkeeping differs from the revision this file replaces.
+ """
+ from __future__ import annotations
+ 
++import heapq
+ from collections.abc import Iterable, Iterator
+ 
+ 
+ class PriorityRequestQueue:
+-    """Priority queue: serve ascending (priority, arrival_time, insertion-seq).
+-
+-    The backing store is an internal detail; only the pop ORDER and the public
+-    method signatures are part of the contract. ``__iter__`` must yield the
+-    requests in the same order in which they would be popped.
+-    """
++    """Priority queue: serve ascending (priority, arrival_time, insertion-seq).
++    The backing store is an internal detail of this module."""
+ 
+     def __init__(self) -> None:
+-        # each entry: (priority, arrival_time, seq, request)
+-        self._items: list[tuple] = []
++        # heap of (priority, arrival_time, seq, request); seq gives a stable FIFO
++        # tiebreak AND keeps tuples orderable without comparing request objects.
++        self._heap: list[tuple] = []
+         self._seq: int = 0
+ 
+-    def _key(self, entry: tuple) -> tuple:
+-        # order by priority, then arrival_time, then insertion seq (FIFO tiebreak)
+-        return (entry[0], entry[1], entry[2])
+-
+     def add_request(self, request) -> None:
+-        self._items.append((request.priority, request.arrival_time, self._seq, request))
++        heapq.heappush(
++            self._heap,
++            (request.priority, request.arrival_time, self._seq, request))
+         self._seq += 1
+ 
+-    def _argmin(self) -> int:
+-        # Locate the entry with the smallest ordering key.
+-        best_i = 0
+-        best_k = self._key(self._items[0])
+-        for i in range(1, len(self._items)):
+-            k = self._key(self._items[i])
+-            if k < best_k:
+-                best_k = k
+-                best_i = i
+-        return best_i
+-
+     def peek_request(self):
+-        if not self._items:
++        if not self._heap:
+             raise IndexError("peek from an empty queue")
+-        return self._items[self._argmin()][3]
++        return self._heap[0][3]
+ 
+     def pop_request(self):
+-        if not self._items:
++        if not self._heap:
+             raise IndexError("pop from an empty queue")
+-        i = self._argmin()
+-        entry = self._items.pop(i)  # take the located entry out of the store
+-        return entry[3]
++        return heapq.heappop(self._heap)[3]
+ 
+     def remove_request(self, request) -> None:
+-        # Drop the matching entry from the backing store.
+-        self._items = [e for e in self._items if e[3] != request]
++        self._heap = [e for e in self._heap if e[3] != request]
++        heapq.heapify(self._heap)
+ 
+     def remove_requests(self, requests: Iterable) -> None:
+         to_remove = set(id(r) for r in requests)
+-        self._items = [e for e in self._items if id(e[3]) not in to_remove]
++        self._heap = [e for e in self._heap if id(e[3]) not in to_remove]
++        heapq.heapify(self._heap)
+ 
+     def __bool__(self) -> bool:
+-        return bool(self._items)
++        return bool(self._heap)
+ 
+     def __len__(self) -> int:
+-        return len(self._items)
++        return len(self._heap)
+ 
+     def __iter__(self) -> Iterator:
+-        for e in sorted(self._items, key=self._key):
++        for e in sorted(self._heap):
+             yield e[3]

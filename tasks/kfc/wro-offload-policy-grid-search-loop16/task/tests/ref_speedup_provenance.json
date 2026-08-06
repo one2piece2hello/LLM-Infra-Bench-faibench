@@ -1,0 +1,6 @@
+{
+  "ref_speedup": 56.516589,
+  "derivation": "oracle-mode / expected-score ratio from the recorded 4-mode validation (recorded 4-mode validation anchor)",
+  "meaning": "the ORACLE speedup over the frozen degraded baseline; the ref_speedup anchor",
+  "precedence": "test.sh prefers the in-image /opt/verifier-correctness-manifest.json ref_speedup; this file is the tests/-local fallback when that key is absent"
+}

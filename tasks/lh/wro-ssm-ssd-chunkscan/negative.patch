@@ -1,0 +1,13 @@
+diff --git a/vllm/model_executor/layers/mamba/ops/ssd_combined.py b/vllm/model_executor/layers/mamba/ops/ssd_combined.py
+index b3fdc21..9855475 100644
+--- a/vllm/model_executor/layers/mamba/ops/ssd_combined.py
++++ b/vllm/model_executor/layers/mamba/ops/ssd_combined.py
+@@ -116,7 +116,7 @@ def _mamba_chunk_scan_combined_fwd(x,
+         dBx = (dt_t[:, :, None, None]
+                * xf[:, t, :, :, None]
+                * Bh[:, t, :, None, :])
+-        h_state = dA[:, :, None, None] * h_state + dBx
++        h_state = dBx  # NEGATIVE: drop the recurrence state carry
+         # y_t = C_t . h_state      -> (b, h, p)
+         y_t = (h_state * Ch[:, t, :, None, :]).sum(dim=-1)
+         if D is not None:

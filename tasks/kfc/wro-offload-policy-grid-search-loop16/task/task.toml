@@ -1,0 +1,49 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wro-offload-policy-grid-search-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "A single-GPU heterogeneous-offload inference runtime in this repository does not fit its model in GPU memory …"
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wro-offload-policy-grid-search-loop16:v1@sha256:018befcc2fed673644bf436c2c159154e74da5ae861bf0844038b647607ed5b6
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wro-offload-policy-grid-search-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wro-offload-policy-grid-search-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+primary_edit_paths = ["offload_policy.py"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "reward"
+goal = "maximize"
+reward_formula = "min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0"
+reward_note = "reward = 0 on any hard gate, on speedup<=1, or on ref_speedup<=1; range [0,1]"
+reward_reference = "/opt/verifier-correctness-manifest.json ref_speedup, fallback tests/ref_speedup.txt (oracle speedup over the frozen degraded baseline)"
+ref_speedup = 56.516589
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+[loop]
+# NOTE: the /opt/loop harness baked into the image applies its own 3/16 in-session budget; for in-session loop scoring the image is authoritative.
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+declared_submission_policy = "single_submission"   # submit == finalize; the 2nd call is refused

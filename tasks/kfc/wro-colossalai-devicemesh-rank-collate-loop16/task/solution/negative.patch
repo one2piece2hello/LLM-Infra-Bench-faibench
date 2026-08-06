@@ -1,0 +1,21 @@
+--- a/colossalai/device/device_mesh.py
++++ b/colossalai/device/device_mesh.py
+@@ -468,14 +468,11 @@
+         # =================================================================
+         # the key of the dict is the axis
+         # the value is the list of global ranks which are in the same process group as the given global rank
++        # NEGATIVE known-bad: return only the querying rank on each axis instead of the
++        # full set of ranks sharing that axis line.
+         global_pg_ranks = {}
+-        for dim, coordinates_of_all_processes in processes_in_the_same_process_group.items():
+-            global_pg_ranks[dim] = []
+-            for process_coordinates in coordinates_of_all_processes:
+-                # find the global rank by local rank combination
+-                for _global_rank, _process_coordinates in self._global_to_local_rank_mapping.items():
+-                    if process_coordinates == _process_coordinates:
+-                        global_pg_ranks[dim].append(_global_rank)
++        for dim in processes_in_the_same_process_group:
++            global_pg_ranks[dim] = [global_rank]
+         return global_pg_ranks
+ 
+     def flatten(self):

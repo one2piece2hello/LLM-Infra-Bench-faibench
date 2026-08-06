@@ -1,0 +1,78 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "insea-dsl-index-symbolic-simplifier-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "You are working on the index-arithmetic front-end of a kernel code generator."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 21600
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/insea-dsl-index-symbolic-simplifier-loop16:loop-20260720T071534Z@sha256:603a11cceba4a7af3e174d083d12f75611cb7b922500b97165874eec7bf0a677
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-insea-dsl-index-symbolic-simplifier-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-insea-dsl-index-symbolic-simplifier-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 16000
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timeout_sec = 3600
+task_kind = "acceleration"
+contract_pattern = "A"
+timing_metric = "node_count"
+candidate_source_root = "/app/repo"
+primary_edit_paths = ["/app/repo/index_expr_simplify.py"]
+forbidden_edit_paths = ["/app/repo/tests/**", "/opt/verifier-*", "/tests/**", "/opt/loop/**"]
+result_paths = [
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+]
+
+[primary_metric]
+name = "index_expr_simplify_nodecount_speedup"
+goal = "maximize"
+metric_kind = "node_count"
+reward_formula = "acceleration: reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0 — 0.5 at parity with the oracle, capped 1.0 at oracle^2; speedup = measured speedup = baseline_nodecount / candidate_nodecount (total AST node count of the simplified expression corpus); deterministic and timing-free (pure-Python stdlib, no GPU). The 12-case hidden correctness suite (exhaustive small-range value-equivalence, error rejection, idempotence, work-evidence), anti-cheat (only index_expr_simplify.py may change) and the computer-algebra-library ban are hard gates."
+ref_speedup = 3.36
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+correctness_gates = [
+    "hidden_case_suite",
+    "normal_recombine_pow2",
+    "normal_trivial_identities",
+    "normal_const_fold",
+    "boundary_single_var",
+    "boundary_range_width_1",
+    "degenerate_already_canonical",
+    "error_div_by_zero_const",
+    "error_unbounded_var",
+    "metamorphic_idempotent",
+    "metamorphic_value_equivalence_exhaustive",
+    "hidden_nonpow2_recombine",
+    "work_evidence_depends_on_var",
+    "candidate_reference_agreement",
+    "anti_cheat_forbidden_edit",
+    "forbidden_symbolic_library_primitive",
+]
+
+[loop]
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+mode = "baked"
+feedback_surface = "/opt/loop/submit.sh"

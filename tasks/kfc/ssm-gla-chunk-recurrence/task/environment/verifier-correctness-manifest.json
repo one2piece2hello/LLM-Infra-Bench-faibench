@@ -1,0 +1,31 @@
+{
+  "schema_version": "kernelbench_correctness_manifest_v1",
+  "task_id": "ssm-gla-chunk-recurrence",
+  "task_kind": "acceleration",
+  "expected_case_count": 12,
+  "primary_workload": "gated-state-recurrence-geomean-4shapes",
+  "ref_speedup": 1.0,
+  "ref_speedup_note": "Anchor 62.2504 calibrated in oracle mode on NVIDIA H20. tests/ref_speedup.txt is authoritative at scoring; this file is only the in-image fallback. See tests/ref_speedup.caveat.md to re-measure on your hardware.",
+  "metric": "wall_time_ms",
+  "direction": "higher_is_better",
+  "target_hardware": "H20",
+  "value_axis": "latency (long-sequence dependency chain; wall-time)",
+  "correctness_axes": [
+    "normal_bf16",
+    "normal_fp16_rectangular",
+    "normal_long_L",
+    "boundary_L1",
+    "boundary_initial_state",
+    "degenerate_no_decay",
+    "degenerate_strong_decay",
+    "degenerate_v_zero",
+    "error_contract",
+    "metamorphic_prefix_causality",
+    "metamorphic_state_threading",
+    "hidden_mixed_decay"
+  ],
+  "public_symbol": "gated_state_recurrence",
+  "primary_edit_paths": [
+    "/app/repo/gated_state_recurrence.py"
+  ]
+}

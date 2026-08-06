@@ -1,0 +1,111 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "a3-moe-train-budget"
+bench = "e2e"
+kind = "performance"
+language = "python"
+title = "Train the best Mixture-of-Experts language model you can within a fixed budget"
+ext_id = "e2e-a3-moe-train-budget"
+difficulty = "hard"
+category = "ml_training"
+lane = "e2e_task"
+family = "A_training"
+author = "fai-bench"
+tags = [
+    "python",
+    "pytorch",
+    "nanogpt",
+    "mixture-of-experts",
+    "moe",
+    "language-model",
+    "training",
+    "expert-routing",
+    "grouped-gemm",
+    "load-balancing",
+    "budget",
+    "h20",
+    "e2e-optimization",
+]
+description = "A3 MoE training system. Train the best language model you can on ONE H20 within a harness-owned wall-clock budget, scored on held-out WikiText-103 val_bpb, subject to a HARD total-parameter FLOOR (the grader re-counts your model's parameters). At that capacity a DENSE model is too compute-heavy to train well in the budget; a sparse top-k Mixture-of-Experts trains far more steps at the same total capacity — IF you realize the sparsity as real single-card throughput (efficient sorted/grouped-GEMM token dispatch) with a balanced router (load-balancing aux loss) and a tuned top-k/experts/capacity frontier. The SHIPPED starter is a plain dense model at the floor, and it is the bar: BOUNDED reward in [0,1] where matching the starter scores 0 and matching a strong reference MoE recipe measured at the same budget scores 0.5. Whole nanoGPT repo editable except a small frozen eval surface."
+instruction = "instruction.md"
+
+[agent]
+# The solver iterates its recipe locally in its session; scoring runs the budgeted training once
+# (single-shot). 5 h budgets many honest iteration cycles.
+timeout_sec = 18000
+
+# Open-source build: `cd task && docker build -f environment/Dockerfile -t fai/e2e-a3-moe-train-budget:oss .`
+# provenance (original internal image, not publicly pullable): <internal registry>/kernelbench/e2e-a3-moe-train-budget:v2-deleak@sha256:7145859f8af6bcd4b561ccb00f1f128e6314d2d1bbc5ae1c092e860f49d63afa
+# 🔁 LOOP16: the shipped image is the loop16 overlay (`crane append` onto the :oss base, purely
+#    additive — /opt/loop + /app/instruction.md only, NOTHING under tests/ changed). Build in two steps:
+#      docker build -f environment/Dockerfile             -t fai/e2e-a3-moe-train-budget:oss .
+#      docker build -f environment/loop_overlay/Dockerfile -t fai/e2e-a3-moe-train-budget:oss-loop16 environment/loop_overlay
+#    The single-shot form (:oss) is a valid alternative; the graded surface (tests/) is identical in both.
+[environment]
+docker_image = "fai/e2e-a3-moe-train-budget:oss-loop16"
+dockerfile = "environment/loop_overlay/Dockerfile"
+dockerfile_single_shot = "environment/Dockerfile"
+build_timeout_sec = 2400
+cpus = 8
+memory_mb = 32768
+gpus = 1
+# H20 只是**锚点标定用卡**,不是硬性限制。换卡时:
+#   1) 按 tests/verifier-correctness-manifest.json 的 recalibrate_howto 重新标定锚点;
+#   2) 用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像(8.0 A100 / 8.9 L40S·4090 / 9.0 H100·H20 / 10.0 B200)。
+gpu_types = ["H20"]
+storage_mb = 30720
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+# test.sh RUNS the solver's training under the harness-owned wall-clock timer (external
+# process-group kill), then evals the checkpoint: re-counts total params for the capacity floor,
+# runs the anti-spoof kit, and computes the held-out bpb. Timeout covers training + eval.
+timeout_sec = 1000
+task_kind = "e2e_optimization"
+submission_root = "/app/submission"
+# The whole /app/repo (nanoGPT) + /app/submission is editable EXCEPT the frozen eval surface.
+forbidden_edit_paths = [
+    "tests/compute_reward.py",
+    "tests/test.sh",
+    "tests/holdout_corpus.txt",
+    "tests/timer.sh",
+    "tests/verifier-correctness-manifest.json",
+    "/tests",
+]
+result_paths = [
+    "/logs/verifier/metrics.json",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+]
+
+[verifier.frozen]
+note = "v1 声明不出 primary_edit_paths:整个 repo 可编辑,被计分的交付物在 [verifier].submission_root 下;评分面靠 [verifier].forbidden_edit_paths + tests/test.sh 里的 sha256 门冻结。"
+
+[primary_metric]
+name = "reward"
+goal = "maximize"
+description = "BOUNDED [0,1] reward.md performance envelope: reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0 with speedup = baseline_bpb / candidate_val_bpb, where baseline_bpb is the SHIPPED dense-at-floor starter's calibrated held-out bpb and ref_speedup is a FROZEN authoring-time constant (baseline_bpb / oracle_val_bpb). 0 at or below the starter, 0.5 at the demonstrated in-budget ceiling, 1.0 only at speedup = ref_speedup**2. 0 on any hard-fail (capacity floor / no checkpoint in budget / anti-spoof / frozen-surface tamper). NOTE: `speedup` is a QUALITY ratio (bits-per-byte at a fixed wall-clock training budget), not a wall-clock ratio — nothing in the reward is timed; the wall-clock is the fixed RESOURCE. The scorer never runs the oracle or the baseline: it reads two frozen constants."
+source = "/logs/verifier/metrics.json"
+ref_speedup = 1.533747535323529
+ref_speedup_source = "tests/verifier-correctness-manifest.json"
+calibrated_on = "NVIDIA H20"
+
+# loop16: the shipped image bakes /opt/loop; the in-session dev proxy trains the candidate recipe on
+# a SMALL PUBLIC dev shard for a SHORT dev wall-clock (under the uid drop), reloads + self-checks +
+# reports a dev val_bpb on the public val split as a COARSE best-of-k ranking signal (NO held-out
+# corpus, NO calibrated anchor baked). At most 16 submissions, at least 1; the model decides when to
+# stop (min=1 so --finalize works any time). The graded score is the runner's fresh end-of-session
+# tests/ grade at the FULL wall-clock budget over the hidden split with the calibrated anchor.
+[loop]
+min_submissions = 1
+max_submissions = 16
+submit = "bash /opt/loop/submit.sh"

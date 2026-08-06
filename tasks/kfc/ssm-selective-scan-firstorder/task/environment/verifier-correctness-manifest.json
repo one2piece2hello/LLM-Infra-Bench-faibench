@@ -1,0 +1,31 @@
+{
+  "schema_version": "kernelbench_correctness_manifest_v1",
+  "task_id": "ssm-selective-scan-firstorder",
+  "task_kind": "acceleration",
+  "expected_case_count": 12,
+  "primary_workload": "state-space-scan-geomean-4shapes",
+  "ref_speedup": 1.0,
+  "ref_speedup_note": "Anchor 103.1823 calibrated in oracle mode on NVIDIA H20. tests/ref_speedup.txt is authoritative at scoring; this file is only the in-image fallback. See tests/ref_speedup.caveat.md to re-measure on your hardware.",
+  "metric": "wall_time_ms",
+  "direction": "higher_is_better",
+  "target_hardware": "H20",
+  "value_axis": "latency via parallel depth (sequential dependency O(L) -> O(log L); wall-time proxies it)",
+  "correctness_axes": [
+    "normal_f32",
+    "normal_shape_variant",
+    "boundary_L1",
+    "boundary_nonpow2_L",
+    "degenerate_A_zero",
+    "degenerate_A_one_cumsum_identity",
+    "error_dtype",
+    "error_shape",
+    "metamorphic_causality",
+    "metamorphic_prefix_consistency",
+    "error_amplify_no_clamp",
+    "hidden_bf16_large_L"
+  ],
+  "public_symbol": "state_space_scan",
+  "primary_edit_paths": [
+    "/app/repo/state_space_scan.py"
+  ]
+}

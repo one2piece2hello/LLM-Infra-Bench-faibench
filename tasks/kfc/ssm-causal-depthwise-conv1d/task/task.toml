@@ -1,0 +1,82 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "ssm-causal-depthwise-conv1d"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "You are optimizing a per-row sequence-mixing step inside the block of a high-throughput sequence model served on GPU."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 21600
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/insea-ssm-causal-depthwise-conv1d-loop16:loop-20260721T042000Z@sha256:526d7e36450fde946edf45d0955919d0f11ba2d440935325c4dfbf18143e1be3
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-ssm-causal-depthwise-conv1d:oss .`
+[environment]
+docker_image = "fai/kfc-ssm-causal-depthwise-conv1d:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32000
+gpus = 1
+# H20 只是**锚点标定用卡**,不是硬性限制。换卡时:①按 tests/ref_speedup.caveat.md 重标锚点;
+#   ②用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像。
+gpu_types = ["H20"]
+gpu_memory_gb = 96
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timeout_sec = 3600
+task_kind = "acceleration"
+contract_pattern = "A"
+timing_metric = "wall_time_ms"
+candidate_source_root = "/app/repo"
+primary_edit_paths = ["/app/repo/channel_window_op.py"]
+forbidden_edit_paths = ["/app/repo/tests/**", "/opt/verifier-*", "/tests/**", "/opt/loop/**"]
+result_paths = [
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+]
+
+[primary_metric]
+name = "channel_window_op_gpu_speedup"
+goal = "maximize"
+metric_kind = "wall_time"
+reward_formula = "reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0 per the reward specification (speedup == ref_speedup -> 0.0 (must EXCEED it to score); speedup>=ref_speedup^2 -> 1.0 cap; range [0,1]); reward = 0 on any hard gate, on speedup<=1, or on ref_speedup<=1. acceleration: measured speedup (per-shape baseline_ms/candidate_ms, geomean over 4 launch/bandwidth-bound (B,C,L) workload shapes) on H20; the op is dominated by kernel launches and global-memory traffic so wall-time tracks the fused-single-pass value axis. The 12-case hidden correctness suite, anti-cheat (only channel_window_op.py may change) and the built-in 1-D-convolution-primitive ban are hard gates."
+ref_speedup = 18.5413
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "NVIDIA H20"
+correctness_gates = [
+    "hidden_parity_suite",
+    "normal_bf16",
+    "normal_fp32",
+    "causality",
+    "left_pad_boundary",
+    "pointwise_K1",
+    "channel_independence",
+    "bias_and_activation",
+    "long_L_fp16",
+    "degenerate_L1_C1",
+    "error_reject",
+    "metamorphic_shift",
+    "work_evidence_impulse",
+    "anti_cheat_forbidden_edit",
+    "forbidden_conv1d_primitive",
+]
+
+[loop]
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+mode = "baked"
+feedback_surface = "/opt/loop/submit.sh"
+declared_submission_policy = "single_submission"

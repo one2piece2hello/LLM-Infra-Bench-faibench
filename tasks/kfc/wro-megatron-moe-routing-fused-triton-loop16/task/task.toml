@@ -1,0 +1,51 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wro-megatron-moe-routing-fused-triton-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "You are given a working implementation of a Mixture-of-Experts routing preprocessing subsystem …"
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wro-megatron-moe-routing-fused-triton-loop16:v1@sha256:69133281d2f5823e6573400e93c820611a53926d98d61fee675ea98353510a87
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wro-megatron-moe-routing-fused-triton-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wro-megatron-moe-routing-fused-triton-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 49152
+gpus = 1
+# H20 只是**锚点标定用卡**,不是硬性限制。换卡时:①按 tests/ref_speedup.caveat.md 重标锚点;
+#   ②用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像。
+gpu_types = ["H20"]
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "acceleration"
+contract_pattern = "acceleration"
+primary_edit_paths = ["megatron/core/fusions/fused_pad_routing_map.py", "megatron/core/fusions/fused_indices_converter.py"]
+forbidden_edit_paths = ["*"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+ref_speedup = 5.902762
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "NVIDIA H20"
+
+[loop]
+# NOTE: the /opt/loop harness baked into the image applies its own 3/16 in-session budget; for in-session loop scoring the image is authoritative.
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"

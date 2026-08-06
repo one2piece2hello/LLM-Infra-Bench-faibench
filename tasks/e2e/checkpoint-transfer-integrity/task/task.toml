@@ -1,0 +1,68 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "checkpoint-transfer-integrity"
+bench = "e2e"
+kind = "implementation"
+language = "python"
+title = "正确性任务：Checkpoint 分层传输的完整性与恢复（checkpoint transfer integrity）"
+ext_id = "correctness-e2e-e5-checkpoint-transfer-integrity"
+difficulty = "hard"
+category = "correctness"
+lane = "e2e_task"
+family = "impl_class"
+midtopic = "E5"
+author = "fai-bench"
+tags = [
+    "CROSS.STORAGE.TRANSFER",
+    "CROSS.STORAGE.CHECKPOINT",
+    "CROSS.STORAGE.INTEGRITY",
+    "checkpoint-transfer",
+    "erasure-parity",
+    "resumable-download",
+]
+description = "Implement a checkpoint-transfer manager: pack blob into chunks+XOR-parity+manifest with per-chunk crc32, all-or-nothing durable upload (ceph-EC commit-or-rollback style), verifying + resumable download (AOF/kafka-manifest style), single-parity reconstruction of one missing chunk (minio-erasure style), and artifact-path normalization (harbor ArtifactHandler style). Binary reward: 1.0 only if EVERY case in the hidden six-axis set (incl. real concurrency cases) passes and no cheat/gate trips, else 0.0."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 21600
+
+# OPEN-SOURCE: build from this task package (no private registry):
+#   cd <this-dir>/task && docker build -f environment/Dockerfile -t fai/e5-checkpoint-transfer-integrity:oss .
+# (original private prebuilt image, provenance only: <internal registry>/kernelbench/correctness-e2e-e5-checkpoint-transfer-integrity-val:v1@sha256:3c31980763486fee0a10d419bd4fcfc7c6bb3712bda30f145c6c9d48c236143b)
+[environment]
+docker_image = "fai/e5-checkpoint-transfer-integrity:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 0
+storage_mb = 16384
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timeout_sec = 1800
+task_kind = "correctness"
+primary_edit_paths = ["submission/ckpt_transfer.py"]
+forbidden_edit_paths = ["tests/test.sh", "tests/workload.py", "/opt/verifier"]
+# 5-file verifier output contract: all five are emitted on EVERY path,
+# including the hard-fail / scorer-crash path (shell fallback at the tail of tests/test.sh).
+result_paths = [
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+]
+
+[primary_metric]
+# BINARY (reward.md 实现类): reward = 1.0 iff all graded cases pass and no cheat/gate trip, else 0.0.
+name = "correctness"
+goal = "maximize"
+source = "/logs/verifier/reward.json"
+calibrated_on = "Intel Sapphire Rapids CPU lane"

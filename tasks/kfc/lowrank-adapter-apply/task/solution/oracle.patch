@@ -1,0 +1,114 @@
+diff --git a/lowrank_adapter_apply.py b/lowrank_adapter_apply.py
+index e2857ec..8943dde 100644
+--- a/lowrank_adapter_apply.py
++++ b/lowrank_adapter_apply.py
+@@ -46,56 +46,72 @@ Error contract
+   ``factor_b`` not ``(N, r)`` — in particular ``factor_a``'s row count must equal
+   ``factor_b``'s column count (the shared rank ``r``).
+ 
+-Note on the current implementation
+------------------------------------
+-The current implementation first builds the full ``[N, K]`` correction matrix
+-``delta = scale * (factor_b @ factor_a)``, adds it into the base weight, and then
+-runs one ``[.., K] @ [K, N]`` matmul against the combined weight. Forming, storing
+-and re-reading that full ``[N, K]`` matrix is precisely the work the low-rank
+-structure lets you avoid: for ``r`` much smaller than ``N`` and ``K`` the correction
+-can be applied as two small matmuls, without ever materializing the ``[N, K]``
+-intermediate. It is correct but leaves the low-rank compute/memory saving on the
+-table.
++Performance note
++----------------
++The full ``[N, K]`` correction matrix is never formed: the base output is one
++GEMM, and the rank-``r`` correction is applied as two small GEMMs, the second
++fused with the output add and the scalar via ``addmm`` — so the correction costs
++on the order of ``M * r * (K + N)`` multiply-adds instead of materializing and
++consuming an ``[N, K]`` matrix.
+ """
+ 
+ import torch
+ 
+ 
+ def _validate(x, base_weight, factor_a, factor_b, scale):
+-    if not isinstance(x, torch.Tensor) or not isinstance(base_weight, torch.Tensor) \
+-            or not isinstance(factor_a, torch.Tensor) or not isinstance(factor_b, torch.Tensor):
++    if not (isinstance(x, torch.Tensor) and isinstance(base_weight, torch.Tensor)
++            and isinstance(factor_a, torch.Tensor) and isinstance(factor_b, torch.Tensor)):
+         raise TypeError("x, base_weight, factor_a, factor_b must be torch.Tensor")
+-    if x.dtype not in (torch.bfloat16, torch.float32):
+-        raise TypeError(f"x must be bfloat16 or float32, got {x.dtype}")
+-    for name, t in (("base_weight", base_weight), ("factor_a", factor_a), ("factor_b", factor_b)):
+-        if t.dtype != x.dtype:
+-            raise TypeError(f"{name} dtype {t.dtype} must match x dtype {x.dtype}")
+-    if x.dim() < 2:
+-        raise ValueError(f"x must be at least 2-D (..., K), got {x.dim()}-D")
+-    K = x.shape[-1]
+-    if base_weight.dim() != 2 or base_weight.shape[1] != K:
+-        raise ValueError(f"base_weight must be 2-D (N, K) with K={K}, got shape {tuple(base_weight.shape)}")
+-    N = base_weight.shape[0]
+-    if factor_a.dim() != 2 or factor_a.shape[1] != K:
+-        raise ValueError(f"factor_a must be 2-D (r, K) with K={K}, got shape {tuple(factor_a.shape)}")
+-    r = factor_a.shape[0]
+-    if factor_b.dim() != 2 or factor_b.shape[0] != N or factor_b.shape[1] != r:
++    dt = x.dtype
++    if dt is not torch.bfloat16 and dt is not torch.float32:
++        raise TypeError(f"x must be bfloat16 or float32, got {dt}")
++    if base_weight.dtype is not dt or factor_a.dtype is not dt or factor_b.dtype is not dt:
++        raise TypeError("base_weight, factor_a, factor_b dtypes must match x dtype")
++    xs = x.shape
++    if len(xs) < 2:
++        raise ValueError(f"x must be at least 2-D (..., K), got {len(xs)}-D")
++    K = xs[-1]
++    bws = base_weight.shape
++    if len(bws) != 2 or bws[1] != K:
++        raise ValueError(f"base_weight must be 2-D (N, K) with K={K}, got shape {tuple(bws)}")
++    N = bws[0]
++    fas = factor_a.shape
++    if len(fas) != 2 or fas[1] != K:
++        raise ValueError(f"factor_a must be 2-D (r, K) with K={K}, got shape {tuple(fas)}")
++    r = fas[0]
++    fbs = factor_b.shape
++    if len(fbs) != 2 or fbs[0] != N or fbs[1] != r:
+         raise ValueError(
+             f"factor_b must be 2-D (N, r) with N={N} and r={r} (factor_a's row count), "
+-            f"got shape {tuple(factor_b.shape)}")
++            f"got shape {tuple(fbs)}")
+     return N, K, r
+ 
+ 
+ def lowrank_adapter_apply(x, base_weight, factor_a, factor_b, scale):
+     """See module docstring for the full contract.
+ 
+-    Naive materialized-delta reference: build the full [N, K] correction
+-    ``scale * (factor_b @ factor_a)``, fold it into the base weight, then run a
+-    single matmul against the combined weight. Correct, but forms and stores the
+-    full [N, K] matrix the low-rank structure would let you skip.
++    Low-rank fast path: never forms the [N, K] correction. Computes the frozen
++    base output with one GEMM and applies the rank-``r`` correction as two small
++    GEMMs, the second fused with the output add and the scalar via ``addmm``::
++
++        y = x @ base_weight.T + scale * ((x @ factor_a.T) @ factor_b.T)
+     """
+-    _validate(x, base_weight, factor_a, factor_b, scale)
+-    delta = float(scale) * (factor_b @ factor_a)          # [N, r] @ [r, K] -> [N, K]
+-    merged = base_weight + delta                          # [N, K]
+-    y = x @ merged.transpose(-1, -2)                      # [.., K] @ [K, N] -> [.., N]
+-    return y
++    N, K, r = _validate(x, base_weight, factor_a, factor_b, scale)
++    s = float(scale)
++    xs = x.shape
++    if len(xs) == 2:
++        y = x.new_empty((xs[0], N))
++        torch.mm(x, base_weight.t(), out=y)               # [M, N]
++        if s != 0.0:
++            z = x.new_empty((xs[0], r))
++            torch.mm(x, factor_a.t(), out=z)              # [M, r]
++            y.addmm_(z, factor_b.t(), beta=1.0, alpha=s)  # y += s * (z @ factor_b.T)
++        return y
++    x2 = x.reshape(-1, K)                                 # [M, K]
++    y = x.new_empty((x2.shape[0], N))
++    torch.mm(x2, base_weight.t(), out=y)                  # [M, N]
++    if s != 0.0:
++        z = x.new_empty((x2.shape[0], r))
++        torch.mm(x2, factor_a.t(), out=z)                 # [M, r]
++        y.addmm_(z, factor_b.t(), beta=1.0, alpha=s)      # y += s * (z @ factor_b.T)
++    return y.view(*xs[:-1], N)

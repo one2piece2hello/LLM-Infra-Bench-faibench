@@ -1,0 +1,46 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wro-torchtitan-varlen-cu-seqlens-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "varlen_cu_seqlens.py builds the variable-length-attention metadata for a batch of packed documents."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wro-torchtitan-varlen-cu-seqlens-loop16:v1@sha256:271a9d56dc7269fe090e3177bf20eb4c88caa249d00b547035f10a747131c5a4
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wro-torchtitan-varlen-cu-seqlens-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wro-torchtitan-varlen-cu-seqlens-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timing_metric = "speedup"
+primary_edit_paths = ["varlen_cu_seqlens.py"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+ref_speedup = 2.806253
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+[loop]
+# NOTE: the /opt/loop harness baked into the image applies its own 3/16 in-session budget; for in-session loop scoring the image is authoritative.
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"

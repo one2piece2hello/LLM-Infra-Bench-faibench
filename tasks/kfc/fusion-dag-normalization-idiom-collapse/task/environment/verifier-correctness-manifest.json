@@ -1,0 +1,32 @@
+{
+  "schema_version": "kernelbench_correctness_manifest_v1",
+  "task_id": "fusion-dag-normalization-idiom-collapse",
+  "task_kind": "acceleration",
+  "expected_case_count": 13,
+  "primary_workload": "fusion-corpus-opcount",
+  "ref_speedup": 1.0,
+  "ref_speedup_note": "Anchor 11.29167 calibrated in oracle mode on the authoring CPU lane (Intel Sapphire Rapids). tests/ref_speedup.txt is authoritative at scoring; this file is only the in-image fallback. See tests/ref_speedup.caveat.md to re-measure on your hardware.",
+  "metric": "op_count",
+  "direction": "higher_is_better",
+  "target_hardware": "cpu (x86-64 Sapphire Rapids; pure-Python stdlib; NO valgrind -> deterministic structural node count, hardware-portable)",
+  "value_axis": "number of nodes in the OUTPUT graph summed over a fixed corpus of computation DAGs; a normalize+idiom-collapse pass emits fewer nodes for the same external behaviour",
+  "correctness_axes": [
+    "normal_canonical_one_idiom",
+    "normal_two_independent_idioms",
+    "boundary_idiom_feeds_trailing_op",
+    "boundary_dupsub_variant_stays_equivalent",
+    "degenerate_no_idiom_unchanged",
+    "degenerate_output_is_input",
+    "error_bad_exponent_not_fused",
+    "error_nonconstant_epsilon_not_fused",
+    "error_interior_escape_not_fused",
+    "metamorphic_node_reorder_same_count",
+    "metamorphic_unrelated_branch",
+    "hidden_cast_variant_stays_equivalent",
+    "hidden_shared_input_two_idioms"
+  ],
+  "public_symbol": "fuse",
+  "primary_edit_paths": [
+    "/app/repo/dag_fusion.py"
+  ]
+}

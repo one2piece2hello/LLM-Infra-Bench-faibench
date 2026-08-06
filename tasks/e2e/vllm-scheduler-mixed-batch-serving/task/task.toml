@@ -1,0 +1,92 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "vllm-scheduler-mixed-batch-serving"
+bench = "e2e"
+kind = "performance"
+language = "python"
+title = "vLLM Serving Optimization — Request Scheduling & Continuous Batching (H20)"
+difficulty = "hard"
+category = "ml-systems-optimization"
+tags = ["inference", "vllm", "serving", "scheduling", "continuous-batching", "optimization", "e2e"]
+description = "Make a vLLM OpenAI-compatible server serve a hidden mix of request shapes faster than a scheduler-hardened strong baseline on one H20, without changing any greedy output. Reward is reward.md's BOUNDED [0,1] envelope over the ABBA-paired MEDIAN speedup: min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0. Merely tying the strong baseline scores 0.0; the score is capped at 1.0. A token-parity failure, a frozen-surface touch, a timer tamper or an anti-cheat probe hit scores 0.0 with a named reason."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 14400   # 4 hours
+
+# OPEN-SOURCE: build from this task package (no private registry, no vendored weights):
+#   cd <this-dir>/task && docker build -f environment/Dockerfile -t fai/vllm-scheduler-mixed-batch-serving:oss .
+# (original private prebuilt image, provenance only: <internal registry>/kernelbench/e2e-vllm-scheduler-mixed-batch-serving:v2@sha256:d9f0b54e6f8662922b6d9f31b8f4dc3614e97e09e01e3f80e8d1d5ea1b22c023)
+# 🔁 LOOP16: the shipped image is the loop16 overlay (`crane append` onto the :oss base, purely
+#    additive — /opt/loop + /app/instruction.md only, NOTHING under tests/ changed). Build in two steps:
+#      docker build -f environment/Dockerfile             -t fai/vllm-scheduler-mixed-batch-serving:oss .
+#      docker build -f environment/loop_overlay/Dockerfile -t fai/vllm-scheduler-mixed-batch-serving:oss-loop16 environment/loop_overlay
+#    The single-shot form (:oss) is a valid alternative; the graded surface (tests/) is identical in both.
+[environment]
+docker_image = "fai/vllm-scheduler-mixed-batch-serving:oss-loop16"
+dockerfile = "environment/loop_overlay/Dockerfile"
+dockerfile_single_shot = "environment/Dockerfile"
+build_timeout_sec = 1200   # prebuilt image, just pull
+cpus = 8
+memory_mb = 98304   # 96 GB
+gpus = 1
+# 开源版: H20 是 ref_speedup 的标定卡,不是硬性限制。换卡可跑,但须按
+# tests/reward_manifest.json 的 recalibrate_howto 重标锚点;
+# 并用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像。
+gpu_types = ["H20"]   # RE-TARGETED from the bench B200 -> H20
+storage_mb = 81920   # 80 GB (Qwen2.5-1.5B + vLLM + baseline snapshot + workspace)
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timeout_sec = 3600   # 1 hour
+task_kind = "e2e_optimization"
+# The frozen evaluation surface (uploaded fresh at scoring, root-0700, not model-visible).
+# The editable area is the WHOLE system (vLLM at /app/repo + site-packages + /app/submission)
+# MINUS these paths.
+forbidden_edit_paths = [
+    "tests/compute_reward.py",
+    "tests/launch_baseline.sh",
+    "tests/prompts.jsonl",
+    "tests/reward_manifest.json",
+    "tests/test.sh",
+    "/app/.timer",
+    "/opt/loop",
+]
+# The full 5-file contract (+ metrics.json) — emitted on EVERY path including hard fails.
+result_paths = [
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+    "/logs/verifier/metrics.json",
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+]
+
+[verifier.frozen]
+note = "v1 声明不出 primary_edit_paths:整个系统(/app/repo + site-packages + /app/submission)可编辑,只有 [verifier].forbidden_edit_paths 列出的评分面被冻结(tests/test.sh 内另有 sha256 门)。"
+
+[primary_metric]
+name = "reward"
+goal = "maximize"
+description = "BOUNDED [0,1] reward.md 性能类 envelope: reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0 with speedup = the MEDIAN of the 6 ABBA-paired per-workload ratios (baseline_ms/candidate_ms, B-A-B; 3 sequential single-request latency anchors + 3 concurrent heterogeneous burst makespans) and ref_speedup a FROZEN authoring-time constant in tests/reward_manifest.json (the oracle is never run at scoring). 0 at or below the strong baseline, 0.5 at ref_speedup, 1.0 at ref_speedup^2. 0 on any of the six named pre-gates: build_or_entry_contract_failed · correctness_failed · cheating_detected · forbidden_edit_path · speedup_not_above_baseline · ref_speedup_invalid_or_missing."
+source = "/logs/verifier/reward.json"
+ref_speedup = 1.2857108264648467
+ref_speedup_source = "tests/reward_manifest.json"
+calibrated_on = "NVIDIA H20"
+
+# loop16: the shipped image bakes /opt/loop; the in-session dev proxy launches the candidate's vLLM
+# server on PUBLIC prompts and reports serving throughput (1000/median_ms) as a COARSE best-of-k
+# ranking signal (NO strong baseline, NO hidden bursts, NO token-parity gate, NO calibrated anchor
+# baked). At most 16 submissions, at least 1; the model decides when to stop (min=1 so --finalize
+# works any time). The graded score is the runner's fresh end-of-session tests/ grade (ABBA median
+# speedup over hidden mixed-burst workloads behind the greedy token-parity gate + calibrated anchor).
+[loop]
+min_submissions = 1
+max_submissions = 16
+submit = "bash /opt/loop/submit.sh"

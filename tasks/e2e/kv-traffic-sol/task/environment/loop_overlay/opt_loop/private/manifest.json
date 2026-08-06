@@ -1,0 +1,19 @@
+{
+  "max_submissions": 16,
+  "min_submissions": 1,
+  "note": "dev reward is an in-session PUBLIC PROXY: the candidate KV-traffic engine run on the author's PUBLIC dev suite (a byte copy of the model-visible /app/dev_bench/dev_suite.json), gated by the REAL bit-exact KV round-trip, and reported as geomean achieved bandwidth (GB/s). Used ONLY to rank best-of-k; the runner end-of-session /tests grade (strong-baseline ABBA over the HIDDEN suite + calibrated anchor) is authoritative. This private tree bakes NO strong-baseline (baseline_kv_traffic.py), NO hidden_suite.json and NO calibrated ref_speedup.",
+  "perf_metric": "reward",
+  "reward_form": "RAW geomean achieved bandwidth GB/s on the public dev suite (higher is better); monotonic in the graded speedup but NOT normalized against the hidden strong baseline / anchor. correctness is a HARD gate (any layer's gathered KV != scattered source -> 0).",
+  "schema_version": "kernelbench_loop_manifest_v1",
+  "scope": [
+    "submission/kv_traffic.py"
+  ],
+  "scoring": "dev_eval.py: candidate KVTrafficEngine on the PUBLIC /opt/loop/private/tests/dev_suite.json; bit-exact round-trip gate; achieved GB/s",
+  "task_id": "e2e-b1-kv-traffic-sol-loop16",
+  "gpu_dev_workload_note": "REDUCED workload for the GPU per-round loop: the dev suite is the author's PUBLIC dev bench (3 small cases: B<=3, num_layers=4, few pages), far smaller than the hidden scored suite, timed with 8 CUDA-event reps. A per-round pass completes in seconds on H20 — no full ABBA pairing against a strong baseline is run in the loop (that is the end-of-session grade).",
+  "thresholds": {
+    "dev_suite": "/opt/loop/private/tests/dev_suite.json",
+    "submission_path": "/app/repo/submission/kv_traffic.py",
+    "timing_reps": 8
+  }
+}

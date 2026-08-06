@@ -1,0 +1,46 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wro-gbench-bigo-least-squares-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "Optimize the empirical Big-O complexity estimator used by a microbenchmark harness."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wro-gbench-bigo-least-squares-loop16:v1@sha256:fb4dc46693a5877dbcf711d2a3e5f369cc98f9d0e41dab959a9ad39365a286f3
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wro-gbench-bigo-least-squares-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wro-gbench-bigo-least-squares-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+primary_edit_paths = ["bench_bigo.py"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+reward_formula = "performance: reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0 — 0.5 at parity with the oracle, capped 1.0 at oracle^2; 0 if a hard gate fails or speedup <= 1. ref_speedup source unchanged (tests/ref_speedup.txt or the in-image manifest)."
+ref_speedup = 55.610556
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+[loop]
+# NOTE: the /opt/loop harness baked into the image applies its own 3/16 in-session budget; for in-session loop scoring the image is authoritative.
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"

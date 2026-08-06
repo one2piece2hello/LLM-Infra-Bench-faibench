@@ -1,0 +1,25 @@
+{
+  "max_submissions": 16,
+  "min_submissions": 1,
+  "note": "dev reward is an in-session PUBLIC PROXY: the candidate scoring pipeline run on the PUBLIC, DISJOINT dev split at /data/eval_harness/dev_samples.jsonl, gated by the REAL welded per-sample consistency + anti-cache checks (recomputed with an independent implementation of the publicly-disclosed reference semantics), and timed in ABBA pairs against the PUBLIC naive template. Used ONLY to rank best-of-k; the runner end-of-session /tests grade over the hidden sample set (strong-baseline ABBA + calibrated anchor) is authoritative. This private tree bakes NO strong-baseline reference, NO held-out sample set and NO calibrated anchor (ref_speedup / strong_baseline_time_sec).",
+  "perf_metric": "reward",
+  "reward_form": "RAW dev speedup = median(naive_template_time / candidate_time) over ABBA pairs on the public dev split (higher is better); monotonic in candidate throughput; NOT normalized against the hidden strong baseline or the calibrated anchor. correctness is a HARD gate (any per-sample mismatch / skipped id / failed anti-cache probe -> 0).",
+  "schema_version": "kernelbench_loop_manifest_v1",
+  "scope": [
+    "submission/scoring_pipeline.py"
+  ],
+  "scoring": "dev_eval.py: candidate scoring_pipeline on the PUBLIC /data/eval_harness/dev split; consistency + anti-cache gates; ABBA speedup vs the public naive template",
+  "task_id": "e2e-h3-eval-harness-throughput-quality-loop16",
+  "thresholds": {
+    "score_atol": 1e-09,
+    "abba_pairs": 6,
+    "timing_repeats": 3,
+    "max_score_time_sec": 900.0,
+    "anti_cache_perturb_frac": 0.25,
+    "probe_seed": 20240725,
+    "max_samples": 200000,
+    "dev_data_path": "/data/eval_harness/dev_samples.jsonl",
+    "naive_baseline_impl": "/opt/loop/private/tests/dev_baseline_naive.py",
+    "submission_path": "/app/submission/scoring_pipeline.py"
+  }
+}

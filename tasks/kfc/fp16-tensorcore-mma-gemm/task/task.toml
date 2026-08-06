@@ -1,0 +1,78 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "fp16-tensorcore-mma-gemm"
+bench = "kfc"
+kind = "performance"
+language = "cuda"
+title = "You are working on the dense matrix-multiply kernel at the heart of a high-throughput inference server's linear layers."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 21600
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/insea-fp16-tensorcore-mma-gemm-loop16:loop-20260720T060134Z@sha256:509511c6d83a631cd2a36a3668e4026eaec0fa635e52d2ca7f05d5e8fa71a4e8
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-fp16-tensorcore-mma-gemm:oss .`
+[environment]
+docker_image = "fai/kfc-fp16-tensorcore-mma-gemm:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32000
+gpus = 1
+# H20 只是**锚点标定用卡**,不是硬性限制。换卡时:①按 tests/ref_speedup.caveat.md 重标锚点;
+#   ②用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像。
+gpu_types = ["H20"]
+gpu_memory_gb = 96
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timeout_sec = 3600
+task_kind = "acceleration"
+contract_pattern = "A"
+timing_metric = "wall_time_ms"
+candidate_source_root = "/app/repo"
+primary_edit_paths = ["/app/repo/gemm_kernel.cu"]
+forbidden_edit_paths = ["/app/repo/gemm.py", "/app/repo/tests/**", "/opt/verifier-*", "/tests/**", "/opt/loop/**"]
+result_paths = [
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+]
+
+[primary_metric]
+name = "fp16_gemm_gpu_speedup"
+goal = "maximize"
+metric_kind = "wall_time"
+reward_formula = "acceleration: reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0 — 0.5 at parity with the oracle, capped 1.0 at oracle^2; speedup = measured speedup (per-shape baseline_ms/candidate_ms, geomean over 4 compute-bound (M,N,K) GEMM shapes) on H20; the op is compute-bound so wall-time tracks achieved fp16 throughput. The 10-case hidden correctness suite (fp32 reference), anti-cheat (only gemm_kernel.cu may change) and the prebuilt-matmul ban (cuBLAS/cublasLt/cutlass/libtorch matmul) are hard gates. The candidate .cu is recompiled with nvcc at scoring."
+ref_speedup = 2.00
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "NVIDIA H20"
+correctness_gates = [
+    "hidden_parity_suite",
+    "normal_square",
+    "normal_rect",
+    "boundary_nonmultiple",
+    "degenerate_k1",
+    "identity_operand",
+    "error_reject",
+    "metamorphic_scale",
+    "metamorphic_permute",
+    "hidden_large_k",
+    "anti_cheat_forbidden_edit",
+    "forbidden_prebuilt_matmul",
+]
+
+[loop]
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+mode = "baked"
+feedback_surface = "/opt/loop/submit.sh"

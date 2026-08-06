@@ -1,0 +1,114 @@
+--- a/torch_optimizer/yogi.py
++++ b/torch_optimizer/yogi.py
+@@ -1,4 +1,5 @@
+ import math
++from collections import defaultdict
+ 
+ import torch
+ import torch.nn as nn
+@@ -84,6 +85,19 @@
+             loss = closure()
+ 
+         for group in self.param_groups:
++            beta1, beta2 = group["betas"]
++            lr = group["lr"]
++            eps = group["eps"]
++            wd = group["weight_decay"]
++
++            # Gather this group's params (with grads) into per-tensor lists so the
++            # whole update runs as a handful of batched (`torch._foreach_*`) ops
++            # instead of a Python loop over one parameter at a time. Params are
++            # bucketed by their step count so the (scalar) bias corrections are
++            # shared within a bucket.
++            buckets = defaultdict(
++                lambda: {"p": [], "g": [], "m": [], "v": []}
++            )
+             for p in group["params"]:
+                 if p.grad is None:
+                     continue
+@@ -97,20 +111,14 @@
+                 state = self.state[p]
+ 
+                 # State initialization
+-                # Followed from official implementation in tensorflow addons:
+-                # https://github.com/tensorflow/addons/blob/master/tensorflow_addons/optimizers/yogi.py#L118 # noqa
+-                # For more details refer to the discussion:
+-                # https://github.com/jettify/pytorch-optimizer/issues/77
+                 if len(state) == 0:
+                     state["step"] = 0
+-                    # Exponential moving average of gradient values
+                     state["exp_avg"] = nn.init.constant_(
+                         torch.empty_like(
+                             p.data, memory_format=torch.preserve_format
+                         ),
+                         group["initial_accumulator"],
+                     )
+-                    # Exponential moving average of squared gradient values
+                     state["exp_avg_sq"] = nn.init.constant_(
+                         torch.empty_like(
+                             p.data, memory_format=torch.preserve_format
+@@ -118,31 +126,42 @@
+                         group["initial_accumulator"],
+                     )
+ 
+-                exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
+-                beta1, beta2 = group["betas"]
+-
+                 state["step"] += 1
+-                bias_correction1 = 1 - beta1 ** state["step"]
+-                bias_correction2 = 1 - beta2 ** state["step"]
+ 
+-                if group["weight_decay"] != 0:
+-                    grad = grad.add(p.data, alpha=group["weight_decay"])
++                if wd != 0:
++                    grad = grad.add(p.data, alpha=wd)
++
++                b = buckets[state["step"]]
++                b["p"].append(p.data)
++                b["g"].append(grad)
++                b["m"].append(state["exp_avg"])
++                b["v"].append(state["exp_avg_sq"])
++
++            for step_t, b in buckets.items():
++                ps, gs, ms, vs = b["p"], b["g"], b["m"], b["v"]
++                if not ps:
++                    continue
++                bias_correction1 = 1 - beta1 ** step_t
++                bias_correction2 = 1 - beta2 ** step_t
+ 
+-                # Decay the first and second moment running average coefficient
+-                exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
++                # Decay the first moment running average coefficient
++                torch._foreach_mul_(ms, beta1)
++                torch._foreach_add_(ms, gs, alpha=1 - beta1)
++
++                grad_squared = torch._foreach_mul(gs, gs)
++
++                # Yogi second-moment update: sign(v - g^2) controls the sign of
++                # the (1 - beta2) increment (the additive, not multiplicative,
++                # variance update that distinguishes Yogi from Adam).
++                sign = torch._foreach_sub(vs, grad_squared)
++                sign = torch._foreach_sign(sign)
++                torch._foreach_addcmul_(vs, sign, grad_squared, value=-(1 - beta2))
++
++                denom = torch._foreach_sqrt(vs)
++                torch._foreach_div_(denom, math.sqrt(bias_correction2))
++                torch._foreach_add_(denom, eps)
+ 
+-                grad_squared = grad.mul(grad)
+-
+-                exp_avg_sq.addcmul_(
+-                    torch.sign(exp_avg_sq - grad_squared),
+-                    grad_squared,
+-                    value=-(1 - beta2),
+-                )
+-
+-                denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(
+-                    group["eps"]
+-                )
+-                step_size = group["lr"] / bias_correction1
+-                p.data.addcdiv_(exp_avg, denom, value=-step_size)
++                step_size = lr / bias_correction1
++                torch._foreach_addcdiv_(ps, ms, denom, value=-step_size)
+ 
+         return loss

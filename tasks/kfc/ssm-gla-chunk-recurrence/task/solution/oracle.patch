@@ -1,0 +1,392 @@
+diff --git a/gated_state_recurrence.py b/gated_state_recurrence.py
+index 5fefc9d..13dae02 100644
+--- a/gated_state_recurrence.py
++++ b/gated_state_recurrence.py
+@@ -68,6 +68,224 @@ dominates the runtime even though the per-position work is tiny.
+ 
+ import torch
+ 
++try:
++    import triton
++    import triton.language as tl
++    _HAS_TRITON = True
++except Exception:  # pragma: no cover
++    _HAS_TRITON = False
++
++
++if _HAS_TRITON:
++
++    @triton.jit
++    def _gsr_intra_kernel(Q, K, V, G, O, scale,
++                          L, Lp, Dk, Dv, BH,
++                          BT: tl.constexpr, BC: tl.constexpr,
++                          BK: tl.constexpr, BV: tl.constexpr,
++                          NK: tl.constexpr, IP: tl.constexpr):
++        """Chunk-local output: pairs inside the same chunk (<= BT positions apart).
++
++        Grid: (ceil(L/BT) * ceil(Dv/BV) * NK, B*H). Each program walks the
++        sub-blocks of one chunk, maintaining a local state m over its slice of
++        key features (decayed contributions of the sub-blocks seen so far within
++        this chunk) and adds: (a) within-sub-block pairs computed element-wise in
++        log space (exponents stay <= 0 for g <= 0), (b) earlier-sub-block pairs
++        through m. Writes o_local into O (padded to Lp).
++        """
++        pid = tl.program_id(0)
++        bh = tl.program_id(1)
++        NDV = tl.cdiv(Dv, BV)
++        i_k = pid % NK
++        i_v = (pid // NK) % NDV
++        i_c = pid // (NK * NDV)
++
++        BKS: tl.constexpr = BK // NK
++        offs_k = i_k * BKS + tl.arange(0, BKS)
++        offs_v = i_v * BV + tl.arange(0, BV)
++        mask_k = offs_k < Dk
++        mask_v = offs_v < Dv
++        qk_base = bh * L * Dk
++        v_base = bh * L * Dv
++        o_base = (i_k * BH + bh) * Lp * Dv
++
++        m = tl.zeros((BKS, BV), dtype=tl.float32)
++        i_idx = tl.arange(0, BC)
++        diag = i_idx[:, None] >= i_idx[None, :]
++        for s in tl.static_range(BT // BC):
++            offs_s = i_c * BT + s * BC + i_idx
++            ms = offs_s < L
++            ptr_g = G + qk_base + offs_s[:, None] * Dk + offs_k[None, :]
++            g_s = tl.load(ptr_g, mask=ms[:, None] & mask_k[None, :], other=0.0).to(tl.float32)
++            gloc = tl.cumsum(g_s, axis=0)                      # inclusive, within sub-block
++            q_s = tl.load(Q + qk_base + offs_s[:, None] * Dk + offs_k[None, :],
++                          mask=ms[:, None] & mask_k[None, :], other=0.0).to(tl.float32) * scale
++            k_s = tl.load(K + qk_base + offs_s[:, None] * Dk + offs_k[None, :],
++                          mask=ms[:, None] & mask_k[None, :], other=0.0).to(tl.float32)
++
++            # (b) earlier sub-blocks of this chunk, via the local state
++            o_s = tl.dot(q_s * tl.exp(gloc), m, input_precision=IP)
++
++            # (a) pairs inside the sub-block, element-wise in log space
++            diff = gloc[:, None, :] - gloc[None, :, :]
++            w = tl.exp(tl.where(diag[:, :, None], diff, float("-inf")))
++            A = tl.sum(q_s[:, None, :] * k_s[None, :, :] * w, axis=2)
++
++            v_s = tl.load(V + v_base + offs_s[:, None] * Dv + offs_v[None, :],
++                          mask=ms[:, None] & mask_v[None, :], other=0.0).to(tl.float32)
++            o_s += tl.dot(A, v_s, input_precision=IP)
++
++            # advance the local state to the next sub-block start
++            gend = tl.sum(g_s, axis=0)                         # (BKS,)
++            kw = k_s * tl.exp(gend[None, :] - gloc)
++            m = tl.exp(gend)[:, None] * m + tl.dot(tl.trans(kw), v_s, input_precision=IP)
++
++            tl.store(O + o_base + offs_s[:, None] * Dv + offs_v[None, :], o_s,
++                     mask=mask_v[None, :])
++
++    @triton.jit
++    def _gsr_fused_kernel(Q, K, V, G, O, S0, SF, scale,
++                          L, Lp, Dk, Dv, BH,
++                          BT: tl.constexpr, BC: tl.constexpr,
++                          BK: tl.constexpr, BV: tl.constexpr,
++                          NK: tl.constexpr, IP: tl.constexpr,
++                          HAS_S0: tl.constexpr, WRITE_SF: tl.constexpr):
++        """Single-pass fused kernel. Grid: (NK * ceil(Dv/BV), B*H); each program
++        owns a (BKS, BV) slice of the running state S and walks the whole
++        sequence chunk by chunk. Per chunk it initializes the local state m = S,
++        then per sub-block emits o_s = (q*exp(gloc)) @ m + within-sub-block
++        log-space attention (all exponents <= 0 for g <= 0) and advances m;
++        S := m at the chunk end threads the state across chunks. Each program
++        writes its own key-slice partial output buffer, so stores are race-free.
++        """
++        pid = tl.program_id(0)
++        bh = tl.program_id(1)
++        NDV = tl.cdiv(Dv, BV)
++        i_k = pid % NK
++        i_v = pid // NK
++
++        BKS: tl.constexpr = BK // NK
++        offs_k = i_k * BKS + tl.arange(0, BKS)
++        offs_v = i_v * BV + tl.arange(0, BV)
++        mask_k = offs_k < Dk
++        mask_v = offs_v < Dv
++        qk_base = bh * L * Dk
++        v_base = bh * L * Dv
++        o_base = (i_k * BH + bh) * Lp * Dv
++
++        S = tl.zeros((BKS, BV), dtype=tl.float32)
++        if HAS_S0:
++            S += tl.load(S0 + bh * Dk * Dv + offs_k[:, None] * Dv + offs_v[None, :],
++                         mask=mask_k[:, None] & mask_v[None, :], other=0.0).to(tl.float32)
++
++        i_idx = tl.arange(0, BC)
++        diag = i_idx[:, None] >= i_idx[None, :]
++        tril_f = diag.to(tl.float32)
++        for c in range(tl.cdiv(L, BT)):
++            m = S
++            for s in tl.static_range(BT // BC):
++                offs_s = c * BT + s * BC + i_idx
++                ms = offs_s < L
++                g_s = tl.load(G + qk_base + offs_s[:, None] * Dk + offs_k[None, :],
++                              mask=ms[:, None] & mask_k[None, :], other=0.0).to(tl.float32)
++                gloc = tl.dot(tril_f, g_s, input_precision="ieee")  # inclusive cumsum
++                q_s = tl.load(Q + qk_base + offs_s[:, None] * Dk + offs_k[None, :],
++                              mask=ms[:, None] & mask_k[None, :], other=0.0).to(tl.float32) * scale
++                k_s = tl.load(K + qk_base + offs_s[:, None] * Dk + offs_k[None, :],
++                              mask=ms[:, None] & mask_k[None, :], other=0.0).to(tl.float32)
++
++                # everything written before this sub-block, via the carried state
++                o_s = tl.dot(q_s * tl.exp(gloc), m, input_precision=IP)
++
++                # pairs inside the sub-block, element-wise in log space
++                diff = gloc[:, None, :] - gloc[None, :, :]
++                w = tl.exp(tl.where(diag[:, :, None], diff, float("-inf")))
++                A = tl.sum(q_s[:, None, :] * k_s[None, :, :] * w, axis=2)
++
++                v_s = tl.load(V + v_base + offs_s[:, None] * Dv + offs_v[None, :],
++                              mask=ms[:, None] & mask_v[None, :], other=0.0).to(tl.float32)
++                o_s += tl.dot(A, v_s, input_precision=IP)
++
++                # advance the state to the next sub-block start
++                gend = tl.sum(g_s, axis=0)                     # (BKS,)
++                kw = k_s * tl.exp(gend[None, :] - gloc)
++                m = tl.exp(gend)[:, None] * m + tl.dot(tl.trans(kw), v_s, input_precision=IP)
++
++                tl.store(O + o_base + offs_s[:, None] * Dv + offs_v[None, :], o_s,
++                         mask=mask_v[None, :])
++            S = m
++
++        if WRITE_SF:
++            tl.store(SF + bh * Dk * Dv + offs_k[:, None] * Dv + offs_v[None, :], S,
++                     mask=mask_k[:, None] & mask_v[None, :])
++
++    @triton.jit
++    def _gsr_inter_kernel(Q, K, V, G, O, S0, SF, scale,
++                          L, Lp, Dk, Dv, BH,
++                          BT: tl.constexpr, BK2: tl.constexpr, BV2: tl.constexpr,
++                          HAS_S0: tl.constexpr, WRITE_SF: tl.constexpr,
++                          IP: tl.constexpr):
++        """Inter-chunk part: o[t] += (scale*q_t * exp(G_t)) @ S_c restricted to
++        this program's key-feature slice, then advance the slice of the global
++        state S <- diag(exp(G_last)) S + (k * exp(G_last - G))^T @ v, one chunk
++        at a time. Grid: (ceil(Dk/BK2) * ceil(Dv/BV2), B*H). Each program owns
++        its (BK2, BV2) state slice and read-modify-writes only its own
++        (i_k, i_v) output tile of the (i_k)-th partial buffer, so updates are
++        race-free. Also threads the initial state in and the final state out.
++        """
++        pid = tl.program_id(0)
++        bh = tl.program_id(1)
++        nkv = tl.cdiv(Dk, BK2)
++        i_k = pid % nkv
++        i_v = pid // nkv
++
++        offs_k = i_k * BK2 + tl.arange(0, BK2)
++        offs_v = i_v * BV2 + tl.arange(0, BV2)
++        mask_k = offs_k < Dk
++        mask_v = offs_v < Dv
++        qk_base = bh * L * Dk
++        v_base = bh * L * Dv
++        o_base = (i_k * BH + bh) * Lp * Dv
++
++        S = tl.zeros((BK2, BV2), dtype=tl.float32)
++        if HAS_S0:
++            S += tl.load(S0 + bh * Dk * Dv + offs_k[:, None] * Dv + offs_v[None, :],
++                         mask=mask_k[:, None] & mask_v[None, :], other=0.0).to(tl.float32)
++
++        i_t = tl.arange(0, BT)
++        for c in range(tl.cdiv(L, BT)):
++            offs_t = c * BT + i_t
++            mt = offs_t < L
++            g_t = tl.load(G + qk_base + offs_t[:, None] * Dk + offs_k[None, :],
++                          mask=mt[:, None] & mask_k[None, :], other=0.0).to(tl.float32)
++            Gc = tl.cumsum(g_t, axis=0)
++            q_t = tl.load(Q + qk_base + offs_t[:, None] * Dk + offs_k[None, :],
++                          mask=mt[:, None] & mask_k[None, :], other=0.0).to(tl.float32) * scale
++            o_t = tl.dot(q_t * tl.exp(Gc), S, input_precision=IP)
++            o_ptr = O + o_base + offs_t[:, None] * Dv + offs_v[None, :]
++            o_prev = tl.load(o_ptr, mask=mask_v[None, :], other=0.0)
++            tl.store(o_ptr, o_prev + o_t, mask=mask_v[None, :])
++
++            k_t = tl.load(K + qk_base + offs_t[:, None] * Dk + offs_k[None, :],
++                          mask=mt[:, None] & mask_k[None, :], other=0.0).to(tl.float32)
++            v_t = tl.load(V + v_base + offs_t[:, None] * Dv + offs_v[None, :],
++                          mask=mt[:, None] & mask_v[None, :], other=0.0).to(tl.float32)
++            Gl = tl.sum(g_t, axis=0)
++            kw = k_t * tl.exp(Gl[None, :] - Gc)
++            S = tl.exp(Gl)[:, None] * S + tl.dot(tl.trans(kw), v_t, input_precision=IP)
++
++        if WRITE_SF:
++            tl.store(SF + bh * Dk * Dv + offs_k[:, None] * Dv + offs_v[None, :], S,
++                     mask=mask_k[:, None] & mask_v[None, :])
++
++
++# intra-kernel launch configuration; overridable for tuning
++_INTRA_CFG = {"BT": 16, "BV": 128, "BKS": 32, "W": 4, "IP": "ieee"}
++# inter-kernel launch configuration
++_INTER_CFG = {"BV": 128, "W": 4, "IP": "tf32x3"}
++# use the single-pass fused kernel when True, intra+inter pair otherwise
++_FUSED = True
++
+ 
+ def _validate(q, k, v, g, initial_state):
+     for name, t in (("q", q), ("k", k), ("v", v), ("g", g)):
+@@ -100,32 +318,143 @@ def _validate(q, k, v, g, initial_state):
+ def gated_state_recurrence(q, k, v, g, initial_state=None, output_final_state=False):
+     """See module docstring for the full contract.
+ 
+-    Naive sequential reference: a Python loop over the L positions, each decaying
+-    the state by its per-feature gate, writing the current key/value outer product,
+-    and reading it back for the query. Correct but the per-position dependency
+-    chain makes it slow (many tiny launches, no reuse of the large matmul units).
++    Chunked reformulation: the sequence is split into chunks of ``C`` positions,
++    each chunk into sub-blocks of ``BS`` positions. Outputs decompose into three
++    terms: (a) pairs inside the same sub-block, computed element-wise in log
++    space; (b) pairs in earlier sub-blocks of the same chunk, via a short scan
++    carrying a per-chunk local state; (c) pairs in earlier chunks, via a scan
++    over chunks carrying the global state with large batched matmuls. All decay
++    exponents are anchored so they stay <= 0 (decay gates have g <= 0), keeping
++    the float32 computation free of overflow.
+     """
+     B, H, L, Dk, Dv = _validate(q, k, v, g, initial_state)
+     orig_dtype = q.dtype
+-    qf = q.to(torch.float32) * (Dk ** -0.5)
+-    kf = k.to(torch.float32)
+-    vf = v.to(torch.float32)
+-    af = g.to(torch.float32).exp()                         # per-feature decay factor
++    device = q.device
++    scale = Dk ** -0.5
++    C, BS = 64, 16
++    NC = (L + C - 1) // C
++    NS = C // BS
++    Lp = NC * C
++
++    use_triton = _HAS_TRITON and q.is_cuda and Dk <= 128 and Dv <= 128
++    if use_triton:
++        qc = q.contiguous()
++        kc = k.contiguous()
++        vc = v.contiguous()
++        gc = g.contiguous()
++        BH = B * H
++        BK = max(16, triton.next_power_of_2(Dk))
++        BV = min(_INTRA_CFG["BV"], max(16, triton.next_power_of_2(Dv)))
++        if BK >= 128 or BV >= 128:
++            BKS = min(BK, _INTRA_CFG["BKS"])
++        else:
++            BKS = max(16, BK // 4)
++        NK = max(1, BK // BKS)
++        if NK > 1:
++            oparts = torch.empty(NK, BH, Lp, Dv, dtype=torch.float32, device=device)
++            o_buf = oparts[0]
++        else:
++            oparts = None
++            o_buf = torch.empty(BH, Lp, Dv, dtype=torch.float32, device=device)
++        BTi = _INTRA_CFG["BT"]
++        s0 = initial_state.contiguous() if initial_state is not None else qc
++        sf = torch.empty(BH, Dk, Dv, dtype=torch.float32, device=device)
++        BV2 = min(_INTER_CFG["BV"], max(16, triton.next_power_of_2(Dv)))
++        if _FUSED:
++            grid = (NK * triton.cdiv(Dv, BV), BH)
++            _gsr_fused_kernel[grid](qc, kc, vc, gc, oparts if NK > 1 else o_buf,
++                                    s0, sf, scale, L, Lp, Dk, Dv, BH,
++                                    BT=BTi, BC=BS, BK=BK, BV=BV, NK=NK,
++                                    IP=_INTER_CFG["IP"],
++                                    HAS_S0=initial_state is not None, WRITE_SF=True,
++                                    num_warps=_INTRA_CFG["W"])
++        else:
++            NCi = Lp // BTi
++            grid = (NCi * triton.cdiv(Dv, BV) * NK, BH)
++            _gsr_intra_kernel[grid](qc, kc, vc, gc, oparts if NK > 1 else o_buf,
++                                    scale, L, Lp, Dk, Dv, BH,
++                                    BT=BTi, BC=BS, BK=BK, BV=BV, NK=NK,
++                                    IP=_INTRA_CFG["IP"], num_warps=_INTRA_CFG["W"])
++            grid2 = (NK * triton.cdiv(Dv, BV2), BH)
++            _gsr_inter_kernel[grid2](qc, kc, vc, gc, oparts if NK > 1 else o_buf,
++                                     s0, sf, scale, L, Lp, Dk, Dv, BH,
++                                     BT=BTi, BK2=BKS, BV2=BV2,
++                                     HAS_S0=initial_state is not None, WRITE_SF=True,
++                                     IP=_INTER_CFG["IP"], num_warps=_INTER_CFG["W"])
++        S = sf.view(B, H, Dk, Dv)
++        if NK > 1:
++            o = oparts.sum(0).view(B, H, NC, C, Dv)
++        else:
++            o = o_buf.view(B, H, NC, C, Dv)
++        o = o.view(B, H, Lp, Dv)[:, :, :L].to(orig_dtype)
++        if output_final_state:
++            return o, S
++        return o
+ 
+-    S = torch.zeros(B, H, Dk, Dv, dtype=torch.float32, device=q.device)
++    if Lp != L:
++        pad = Lp - L
++        z = (0, 0, 0, pad)
++        q = torch.nn.functional.pad(q, z)
++        k = torch.nn.functional.pad(k, z)
++        g = torch.nn.functional.pad(g, z)
++        v = torch.nn.functional.pad(v, z)
++
++    qf = q.view(B, H, NC, C, Dk).to(torch.float32) * scale
++    kf = k.view(B, H, NC, C, Dk).to(torch.float32)
++    vf = v.view(B, H, NC, C, Dv).to(torch.float32)
++    G = g.view(B, H, NC, C, Dk).to(torch.float32).cumsum(dim=3)  # inclusive, within chunk
++
++    qs = qf.view(B, H, NC, NS, BS, Dk)
++    ks = kf.view(B, H, NC, NS, BS, Dk)
++    vs = vf.view(B, H, NC, NS, BS, Dv)
++    Gs = G.view(B, H, NC, NS, BS, Dk)
++    # exclusive decay anchor at each sub-block start (0 for the first sub-block)
++    Gpre = torch.cat([torch.zeros_like(Gs[:, :, :, :1, -1:]), Gs[:, :, :, :-1, -1:]], dim=3)
++    Gend = Gs[:, :, :, :, -1:]                                   # (B, H, NC, NS, 1, Dk)
++
++    o = torch.zeros(B, H, NC, C, Dv, dtype=torch.float32, device=device)
++    m = torch.zeros(B, H, NC, Dk, Dv, dtype=torch.float32, device=device)
++    tril = torch.ones(BS, BS, dtype=torch.bool, device=device).tril().reshape(1, 1, 1, BS, BS, 1)
++    for s in range(NS):
++        q_s = qs[:, :, :, s]                                     # (B, H, NC, BS, Dk)
++        k_s = ks[:, :, :, s]
++        v_s = vs[:, :, :, s]                                     # (B, H, NC, BS, Dv)
++        G_s = Gs[:, :, :, s]                                     # (B, H, NC, BS, Dk)
++        Gpre_s = Gpre[:, :, :, s]                                # (B, H, NC, 1, Dk)
++        Gend_s = Gend[:, :, :, s]                                # (B, H, NC, 1, Dk)
++
++        # (b) earlier sub-blocks of the same chunk, through the local state m
++        qw = q_s * torch.exp(G_s - Gpre_s)
++        o_s = qw @ m                                             # (B, H, NC, BS, Dv)
++
++        # (a) pairs inside the sub-block, element-wise in log space
++        logA = G_s.unsqueeze(4) - G_s.unsqueeze(3)               # (B, H, NC, BS, BS, Dk)
++        logA = logA.masked_fill(~tril, float("-inf"))
++        w = torch.exp(logA)
++        A = (w * q_s.unsqueeze(4) * k_s.unsqueeze(3)).sum(-1)    # (B, H, NC, BS, BS)
++        o_s = o_s + A @ v_s
++
++        # advance the local state to the next sub-block start
++        kw = k_s * torch.exp(Gend_s - G_s)
++        m = torch.exp(Gend_s - Gpre_s).transpose(-1, -2) * m + kw.transpose(-1, -2) @ v_s
++
++        o[:, :, :, s * BS:(s + 1) * BS] = o_s
++
++    # (c) earlier chunks, through the global state scan
++    Gl = G[:, :, :, -1]                                          # (B, H, NC, Dk)
++    E = torch.exp(Gl)
++    kw_c = kf * torch.exp(Gl.unsqueeze(3) - G)
++    U = kw_c.transpose(-1, -2) @ vf                              # (B, H, NC, Dk, Dv)
++    qw_c = qf * torch.exp(G)                                     # (B, H, NC, C, Dk)
++
++    S = torch.zeros(B, H, Dk, Dv, dtype=torch.float32, device=device)
+     if initial_state is not None:
+         S = S + initial_state.to(torch.float32)
+-    o = torch.empty(B, H, L, Dv, dtype=torch.float32, device=q.device)
+-
+-    for t in range(L):
+-        q_t = qf[:, :, t]                                  # (B, H, Dk)
+-        k_t = kf[:, :, t]                                  # (B, H, Dk)
+-        v_t = vf[:, :, t]                                  # (B, H, Dv)
+-        a_t = af[:, :, t].unsqueeze(-1)                    # (B, H, Dk, 1) decay
+-        S = a_t * S + k_t.unsqueeze(-1) * v_t.unsqueeze(-2)  # decay, then write outer(k, v)
+-        o[:, :, t] = (q_t.unsqueeze(-1) * S).sum(dim=-2)   # query readout of updated state
++    for c in range(NC):
++        o[:, :, c] += qw_c[:, :, c] @ S
++        S = E[:, :, c].unsqueeze(-1) * S + U[:, :, c]
+ 
+-    o = o.to(orig_dtype)
++    o = o.view(B, H, Lp, Dv)[:, :, :L].to(orig_dtype)
+     if output_final_state:
+         return o, S
+     return o

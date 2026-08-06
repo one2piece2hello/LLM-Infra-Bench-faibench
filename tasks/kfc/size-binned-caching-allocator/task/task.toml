@@ -1,0 +1,83 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "size-binned-caching-allocator"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "You are working on the caching allocator inside a training runtime."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 21600
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/insea-size-binned-caching-allocator-loop16:loop-20260720T111700Z@sha256:e8d0f4387530e4a521bf91e2fb1e0fa7bf2e63e2deb4cfe06d5ff7aa9358a257
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-size-binned-caching-allocator:oss .`
+[environment]
+docker_image = "fai/kfc-size-binned-caching-allocator:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 16000
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timeout_sec = 3600
+task_kind = "acceleration"
+contract_pattern = "A"
+timing_metric = "callgrind_ir"
+candidate_source_root = "/app/repo"
+primary_edit_paths = ["/app/repo/caching_allocator.py"]
+forbidden_edit_paths = ["/app/repo/tests/**", "/opt/verifier-*", "/tests/**", "/opt/loop/**"]
+result_paths = [
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+]
+
+[primary_metric]
+name = "caching_allocator_ir_speedup"
+goal = "maximize"
+metric_kind = "instruction_count"
+reward_formula = "acceleration: reward = measured speedup = baseline_Ir / candidate_Ir (valgrind/callgrind retired-instruction count for build+replay of an alloc/free stream against a large pool of many distinct-size freed buffers); deterministic and hardware-portable (pure-Python stdlib). The naive baseline linear-scans the whole flat pool for a size-exact match on every alloc; the efficient form indexes the pool by size (O(1) lookup) while producing IDENTICAL observable output (decision sequence + device-op counters + final live/cached size multisets). The 14-case hidden correctness suite (size-exact reuse, evict-and-retry on OOM, non-cacheable release, device-alloc-reduction work evidence), anti-cheat (only caching_allocator.py may change) and the real-allocator/array-library/framework ban are hard gates."
+ref_speedup = 25.48631
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+correctness_gates = [
+    "hidden_case_suite",
+    "normal_reuse_same_size",
+    "normal_distinct_sizes_no_reuse",
+    "boundary_first_alloc_always_new",
+    "boundary_single_size_bucket",
+    "boundary_all_distinct_sizes",
+    "degenerate_all_same_size_one_devalloc",
+    "degenerate_noncacheable_no_pool",
+    "error_free_unknown_handle",
+    "error_bad_size_and_capacity",
+    "error_oom_after_evict",
+    "metamorphic_decisions_equal_reference",
+    "metamorphic_free_order_independence",
+    "hidden_interleaved_long_stream",
+    "work_evidence_devalloc_reduction",
+    "candidate_reference_agreement",
+    "anti_cheat_forbidden_edit",
+    "forbidden_allocator_or_framework_primitive",
+]
+
+[loop]
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+mode = "baked"
+feedback_surface = "/opt/loop/submit.sh"
+# single-submission — min=max=1; the first
+# `bash /opt/loop/submit.sh` IS the final graded submission (submit == finalize).
+declared_submission_policy = "single_submission"

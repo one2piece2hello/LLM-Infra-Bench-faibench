@@ -1,0 +1,121 @@
+diff --git a/streamed_apply.py b/streamed_apply.py
+index ec24f5d..b80e2b5 100644
+--- a/streamed_apply.py
++++ b/streamed_apply.py
+@@ -1,61 +1,14 @@
+-"""Stream a list of host-resident chunks to the GPU and apply a per-chunk op.
+-
+-Public entry point:
+-    ``streamed_chunk_apply(chunks, compute) -> torch.Tensor``
+-
+-This is the data-movement step in front of a chunked GPU workload: a large tensor
+-lives in host (CPU) memory, already split into ``N`` chunks (row-blocks). Each chunk
+-must be moved host-to-device and then transformed by a per-chunk ``compute`` op that
+-runs on the GPU. The processed chunks are concatenated (in input order) into a single
+-device tensor.
+-
+-Contract
+---------
+-- ``chunks``: a ``list``/``tuple`` of CPU ``torch.Tensor`` (host memory). Each chunk is
+-  at least 1-D; the leading dimension is the row/block axis and may differ across
+-  chunks, while every chunk shares the same trailing shape ``chunk.shape[1:]`` and the
+-  same floating dtype.
+-- ``compute``: a callable mapping a CUDA tensor to a CUDA tensor. It is applied once to
+-  the on-device copy of each chunk and preserves the leading (row) dimension. Treat it
+-  as an opaque GPU operation — invoke it once per chunk; do not inspect or rewrite it.
+-
+-Functionality::
+-
+-    for each chunk c (in order):
+-        d       = c copied to the GPU            # host -> device transfer
+-        out_c   = compute(d)                     # per-chunk GPU work
+-    result = concatenate(out_c for all chunks, along dim 0)
+-
+-The result is a single CUDA tensor equal to running the transfer-then-compute for
+-every chunk sequentially and concatenating the outputs in the original chunk order.
+-An empty ``chunks`` list yields an empty CUDA tensor.
+-
+-Returns
+--------
+-A CUDA ``torch.Tensor``: the per-chunk outputs concatenated along dim 0, in chunk order.
+-
+-Error contract
+---------------
+-- ``TypeError`` if ``compute`` is not callable, ``chunks`` is not a list/tuple, a chunk
+-  is not a ``torch.Tensor``, or the chunks do not all share one dtype.
+-- ``ValueError`` if a chunk is not in host (CPU) memory, a chunk is 0-D, or the chunks
+-  do not all share the same trailing shape ``chunk.shape[1:]``.
+-
+-Note on allowed operations
+---------------------------
+-Build the transfer/compute schedule yourself with explicit CUDA stream and event
+-management (``torch.cuda.Stream`` / ``torch.cuda.Event`` / pinned host memory /
+-non-blocking copies are the intended tools). Do NOT delegate the pipelining to a
+-framework auto-overlap / graph-capture convenience (CUDA-graph capture-and-replay of
+-the loop, dataloader-style background prefetchers, or any helper that auto-pipelines
+-host-to-device copies with compute); those are out of scope and are blocked at scoring.
+-
+-The current implementation moves one chunk to the GPU and only then launches its
+-compute, one chunk fully after another on a single stream. While a chunk's bytes are
+-streaming in, the GPU compute units sit idle; while a chunk is being computed, the
+-transfer engine sits idle. The two phases never run at the same time, so the total
+-latency is the *sum* of all transfers plus all compute — the transfer latency is fully
+-exposed instead of being hidden behind compute.
++"""REVIEWER-ONLY negative control (known-bad) for insea-h2d-prefetch-compute-overlap-loop16.
++MUST score reward 0.
++
++Bug: the SPEC known-bad "reuse a single staging buffer / read a chunk before its copy
++completes". It uses ONE shared device buffer and, on each step, prefetches chunk i+1 into
++that SAME buffer on the copy stream and then computes chunk i from the buffer WITHOUT any
++copy-completion event or wait. The compute therefore reads chunk i+1's bytes (buffer
++aliasing) — and, with no event synchronization, may even read a half-written buffer while
++the copy is still in flight. The result no longer matches the sequential copy-then-compute
++reference (output blocks hold the wrong chunk's data), so the hidden correctness suite fails
++(named hard_fail ``hidden_correctness_failed``) and reward is 0. Reviewer-only; never baked.
+ """
+ 
+ import torch
+@@ -88,18 +41,31 @@ def _validate(chunks, compute):
+ 
+ 
+ def streamed_chunk_apply(chunks, compute):
+-    """See module docstring for the full contract.
+-
+-    Naive serial schedule: for each chunk, copy it to the GPU and then compute it,
+-    one chunk fully after another on the default stream. Correct, but the host-to-device
+-    transfer latency is never hidden behind compute (transfers and compute never overlap),
+-    so total latency is the sum of every transfer plus every compute.
+-    """
++    """KNOWN-BAD single-buffer prefetch with no synchronization (reviewer negative)."""
+     _validate(chunks, compute)
+-    if len(chunks) == 0:
++    n = len(chunks)
++    if n == 0:
+         return torch.empty(0, device="cuda")
+-    outs = []
+-    for c in chunks:
+-        d = c.to("cuda", non_blocking=False)   # blocking host -> device on the default stream
+-        outs.append(compute(d))                # compute only starts after the copy finishes
++
++    dev = torch.device("cuda")
++    trailing = tuple(chunks[0].shape[1:])
++    dtype = chunks[0].dtype
++    max_rows = max(int(c.shape[0]) for c in chunks)
++
++    compute_stream = torch.cuda.current_stream()
++    copy_stream = torch.cuda.Stream()
++    buf = torch.empty((max_rows, *trailing), dtype=dtype, device=dev)  # KNOWN-BAD: one shared buffer
++
++    with torch.cuda.stream(copy_stream):
++        buf.narrow(0, 0, int(chunks[0].shape[0])).copy_(chunks[0], non_blocking=True)
++
++    outs = [None] * n
++    for i in range(n):
++        # KNOWN-BAD: prefetch chunk i+1 into the SAME buffer, then read the buffer for
++        # chunk i with no copy-completion event/wait -> aliased / racing read.
++        if i + 1 < n:
++            with torch.cuda.stream(copy_stream):
++                buf.narrow(0, 0, int(chunks[i + 1].shape[0])).copy_(chunks[i + 1], non_blocking=True)
++        rows = int(chunks[i].shape[0])
++        outs[i] = compute(buf.narrow(0, 0, rows))  # no compute_stream.wait_event(copy_done)
+     return torch.cat(outs, dim=0)

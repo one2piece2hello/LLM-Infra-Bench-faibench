@@ -1,0 +1,123 @@
+diff --git a/native_histogram_merge.py b/native_histogram_merge.py
+--- a/native_histogram_merge.py
++++ b/native_histogram_merge.py
+@@ -73,74 +73,60 @@
+ """
+ 
+ 
+-def _check_schema(schema):
+-    if isinstance(schema, bool) or not isinstance(schema, int):
+-        raise TypeError(f"schema must be an int, got {type(schema).__name__}")
+-
+-
+-def _normalize(histogram):
+-    """Read a histogram dict into (schema, zero_count, sum, buckets_list)."""
+-    schema = histogram["schema"]
+-    zero_count = int(histogram.get("zero_count", 0))
+-    total = int(histogram.get("sum", 0))
+-    buckets = [(int(i), int(c)) for i, c in histogram.get("buckets", [])]
+-    return schema, zero_count, total, buckets
+-
+-
+ class NativeHistogramMerger:
+     """See the module docstring for the full contract.
+ 
+-    Naive reference accumulator: stores every added histogram, and on ``merged()``
+-    expands them into one dense array covering the full min..max index range, adds
+-    every count into it, then re-sparsifies by walking the entire range. Correct,
+-    but the work grows with the index span rather than with the populated buckets.
++    Sparse accumulator: each ``add`` folds the histogram's populated buckets
++    straight into a running index -> total-count mapping, and ``merged`` sorts
++    that mapping's (already distinct) indices. Work scales with the number of
++    populated buckets, never with the index span.
+     """
+ 
++    __slots__ = ("schema", "_zero", "_sum", "_counts", "_get", "_cached")
++
+     def __init__(self, schema=0):
+-        _check_schema(schema)
+-        self.schema = int(schema)
+-        # each stored item: (zero_count, sum, [(index, count), ...])
+-        self._hists = []
++        if isinstance(schema, bool) or not isinstance(schema, int):
++            raise TypeError(f"schema must be an int, got {type(schema).__name__}")
++        self.schema = schema
++        self._zero = 0
++        self._sum = 0
++        self._counts = {}
++        self._get = self._counts.get
++        self._cached = None
+ 
+     def add(self, histogram):
+-        schema, zero_count, total, buckets = _normalize(histogram)
++        schema = histogram["schema"]
+         if schema != self.schema:
+             raise ValueError(
+-                f"schema mismatch: cannot fold schema {schema} into a merge at "
+-                f"schema {self.schema}")
+-        self._hists.append((zero_count, total, buckets))
++                f"schema mismatch: cannot fold schema {schema} "
++                f"into a merge at schema {self.schema}")
++        try:
++            zero = histogram["zero_count"]
++            total = histogram["sum"]
++            buckets = histogram["buckets"]
++        except KeyError:
++            zero = histogram.get("zero_count", 0)
++            total = histogram.get("sum", 0)
++            try:
++                buckets = histogram["buckets"]
++            except KeyError:
++                buckets = ()
++        self._zero += zero
++        self._sum += total
++        self._cached = None
++        counts = self._counts
++        get = self._get
++        for idx, cnt in buckets:
++            counts[idx] = get(idx, 0) + cnt
+ 
+     def merged(self):
+-        total_zero = 0
+-        total_sum = 0
+-        lo = None
+-        hi = None
+-        for zero_count, total, buckets in self._hists:
+-            total_zero += zero_count
+-            total_sum += total
+-            for idx, _cnt in buckets:
+-                if lo is None or idx < lo:
+-                    lo = idx
+-                if hi is None or idx > hi:
+-                    hi = idx
+-
+-        out_buckets = []
+-        if lo is not None:
+-            width = hi - lo + 1
+-            # dense array over the ENTIRE index range (mostly zeros when sparse)
+-            dense = [0] * width
+-            for _zero_count, _total, buckets in self._hists:
+-                for idx, cnt in buckets:
+-                    dense[idx - lo] += cnt
+-            # re-sparsify: walk the whole dense range, emit the non-empty cells
+-            for offset in range(width):
+-                c = dense[offset]
+-                if c != 0:
+-                    out_buckets.append((lo + offset, c))
+-
+-        return {
+-            "schema": self.schema,
+-            "zero_count": total_zero,
+-            "sum": total_sum,
+-            "buckets": out_buckets,
+-        }
++        cached = self._cached
++        if cached is None:
++            cached = {
++                "schema": self.schema,
++                "zero_count": self._zero,
++                "sum": self._sum,
++                "buckets": sorted(self._counts.items()),
++            }
++            self._cached = cached
++        return cached

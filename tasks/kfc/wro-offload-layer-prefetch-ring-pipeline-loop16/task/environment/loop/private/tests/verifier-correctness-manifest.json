@@ -1,0 +1,11 @@
+{
+  "task_id": "wro-offload-layer-prefetch-ring-pipeline",
+  "perf_metric": "speedup",
+  "ref_speedup": 32.230499,
+  "oracle_candidate_ms": 3.8421,
+  "baseline_ms": 123.8328,
+  "noop_speedup": 1.023921,
+  "baseline2_speedup": 1.885342,
+  "anchor_source": "4-mode validation run on the authoring CPU lane (Intel Sapphire Rapids)",
+  "notes": "ref_speedup is the oracle anchor measured on the authoring lane, not a locally re-measured number."
+}

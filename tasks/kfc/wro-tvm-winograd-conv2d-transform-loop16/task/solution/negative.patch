@@ -1,0 +1,147 @@
+diff --git a/winograd_conv.py b/winograd_conv.py
+--- a/winograd_conv.py
++++ b/winograd_conv.py
+@@ -37,10 +37,9 @@
+ Only ``stride = 1`` and ``dilation = 1`` are in scope -- exactly the regime in
+ which TVM enables the Winograd path -- and the kernel must be square.
+ 
+-This module is currently the SLOW-BUT-CORRECT reference path: each of the six
+-stages is a literal transliteration of the scalar reduction its TVM ``te.compute``
+-declares, one output element and one tap at a time, which is orders of magnitude
+-slower than the same arithmetic expressed over whole arrays.
++Every stage above is evaluated with whole-array numpy contractions, so the block
++holds to its exact numerical contract while staying inside the per-node budget of
++an edge CPU.
+ """
+ 
+ import numpy as np
+@@ -304,20 +303,15 @@
+     alpha = m + r - 1
+     nh, nw, p_total = winograd_tile_geometry(n, oh, ow, m)
+ 
+-    # degraded: one scalar store per (eps, nu, tile, channel).
+-    out = np.zeros((alpha, alpha, p_total, ci), dtype=np.float64)
++    padded = np.zeros(
++        (n, (nh - 1) * m + alpha, (nw - 1) * m + alpha, ci), dtype=np.float64)
++    padded[:, pt:pt + h, pl:pl + w, :] = arr
++    out = np.empty((alpha, alpha, p_total, ci), dtype=np.float64)
+     for eps in range(alpha):
++        rows = padded[:, eps:eps + (nh - 1) * m + 1:m, :, :]
+         for nu in range(alpha):
+-            for p in range(p_total):
+-                batch = p // (nh * nw)
+-                ph = (p // nw) % nh
+-                pw = p % nw
+-                iy = ph * m + eps - pt
+-                ix = pw * m + nu - pl
+-                if iy < 0 or iy >= h or ix < 0 or ix >= w:
+-                    continue
+-                for c in range(ci):
+-                    out[eps, nu, p, c] = arr[batch, iy, ix, c]
++            out[eps, nu] = rows[:, :, nu:nu + (nw - 1) * m + 1:m, :].reshape(
++                p_total, ci)
+     return out
+ 
+ 
+@@ -349,17 +343,9 @@
+         raise ValueError("b_mat must be [alpha, alpha] with alpha=%d" % alpha)
+     p_total, ci = xa.shape[2], xa.shape[3]
+ 
+-    # degraded: one scalar multiply-accumulate per (data_pack element, tap pair).
+-    out = np.zeros((alpha, alpha, p_total, ci), dtype=np.float64)
+-    for eps in range(alpha):
+-        for nu in range(alpha):
+-            for p in range(p_total):
+-                for c in range(ci):
+-                    acc = 0.0
+-                    for ra in range(alpha):
+-                        for rb in range(alpha):
+-                            acc += xa[ra, rb, p, c] * bm[ra, eps] * bm[rb, nu]
+-                    out[eps, nu, p, c] = acc
++    half = np.tensordot(bm, xa, axes=([1], [0]))
++    out = np.ascontiguousarray(
++        np.tensordot(bm, half, axes=([1], [1])).transpose(1, 0, 2, 3))
+     return out
+ 
+ 
+@@ -396,18 +382,9 @@
+     if ci < 1 or co < 1:
+         raise ValueError("weight must have positive channel extents")
+ 
+-    # degraded: one scalar multiply-accumulate per (kernel_pack element, tap pair).
+-    out = np.zeros((alpha, alpha, co, ci), dtype=np.float64)
+-    for eps in range(alpha):
+-        for nu in range(alpha):
+-            for oc in range(co):
+-                for c in range(ci):
+-                    acc = 0.0
+-                    for rkh in range(kh):
+-                        for rkw in range(kw):
+-                            acc += wa[rkh, rkw, c, oc] * gm[eps, rkh] \
+-                                * gm[nu, rkw]
+-                    out[eps, nu, oc, c] = acc
++    half = np.tensordot(gm, wa, axes=([1], [0]))
++    out = np.ascontiguousarray(
++        np.tensordot(gm, half, axes=([1], [1])).transpose(1, 0, 3, 2))
+     return out
+ 
+ 
+@@ -445,16 +422,10 @@
+     p_total, ci = da.shape[2], da.shape[3]
+     co = ka.shape[2]
+ 
+-    # degraded: one scalar multiply-accumulate per (bgemm element, input channel).
+-    out = np.zeros((alpha, alpha, p_total, co), dtype=np.float64)
+-    for eps in range(alpha):
+-        for nu in range(alpha):
+-            for p in range(p_total):
+-                for oc in range(co):
+-                    acc = 0.0
+-                    for c in range(ci):
+-                        acc += da[eps, nu, p, c] * ka[eps, nu, oc, c]
+-                    out[eps, nu, p, oc] = acc
++    aa = alpha * alpha
++    xm = da.reshape(aa, p_total, ci)
++    fm = np.ascontiguousarray(ka.reshape(aa, co, ci).transpose(0, 2, 1))
++    out = (xm @ fm).reshape(alpha, alpha, p_total, co)
+     return out
+ 
+ 
+@@ -491,17 +462,9 @@
+         raise ValueError("a_mat tile extent %d out of range" % m)
+     p_total, co = ga.shape[2], ga.shape[3]
+ 
+-    # degraded: one scalar multiply-accumulate per (inverse element, tap pair).
+-    out = np.zeros((m, m, p_total, co), dtype=np.float64)
+-    for vh in range(m):
+-        for vw in range(m):
+-            for p in range(p_total):
+-                for oc in range(co):
+-                    acc = 0.0
+-                    for ra in range(alpha):
+-                        for rb in range(alpha):
+-                            acc += ga[ra, rb, p, oc] * am[ra, vh] * am[rb, vw]
+-                    out[vh, vw, p, oc] = acc
++    half = np.tensordot(am, ga, axes=([0], [0]))
++    out = np.ascontiguousarray(
++        np.tensordot(am, half, axes=([0], [1])))
+     return out
+ 
+ 
+@@ -543,14 +506,9 @@
+     out_w = int(out_w)
+     co = ya.shape[3]
+ 
+-    # degraded: one scalar read per (batch, row, column, output channel).
++    grid = ya.reshape(m, m, batch, nh, nw, co).transpose(2, 4, 0, 3, 1, 5)
+     out = np.empty((batch, out_h, out_w, co), dtype=np.float64)
+-    for bn in range(batch):
+-        for y in range(out_h):
+-            for x in range(out_w):
+-                p = bn * nh * nw + (y // m) * nw + (x // m)
+-                for oc in range(co):
+-                    out[bn, y, x, oc] = ya[y % m, x % m, p, oc]
++    out[...] = grid.reshape(batch, nw * m, nh * m, co)[:, :out_h, :out_w, :]
+     return out
+ 
+ 

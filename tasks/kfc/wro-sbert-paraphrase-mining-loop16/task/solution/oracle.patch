@@ -1,0 +1,145 @@
+diff --git a/paraphrase_miner.py b/paraphrase_miner.py
+index 076aecf..eaf0a2c 100644
+--- a/paraphrase_miner.py
++++ b/paraphrase_miner.py
+@@ -1,97 +1,67 @@
+ """All-pairs paraphrase mining over quantized sentence embeddings (sentence-transformers).
+ 
+-Given a corpus of ``N`` sentence embeddings, paraphrase mining finds the highest-similarity
+-DISTINCT sentence pairs -- the near-duplicate / paraphrase candidates. Similarity is the dot
+-product of the embeddings; the embeddings are 8-bit-quantized integer vectors (the
+-memory-efficient retrieval representation), so every pairwise score is an exact integer.
+-
+-This mirrors sentence-transformers ``util/retrieval.py`` ::
+-``paraphrase_mining_embeddings``: for every sentence it keeps its ``top_k`` most-similar
+-other sentences, collects the resulting ``(score, i, j)`` candidate pairs into a single
+-pool, canonicalises each pair so ``i < j`` and de-duplicates it (a pair must be reported
+-once, not once per direction), then returns the pairs sorted by descending score (ties
+-broken by ascending ``(i, j)``), capped at ``max_pairs``.
++Finds the highest-similarity distinct sentence pairs in a corpus of integer-quantized
++embeddings (similarity = integer dot product). Mirrors sentence-transformers
++``util/retrieval.py`` :: ``paraphrase_mining_embeddings``: keep each sentence's ``top_k``
++most-similar neighbours, pool the candidate pairs, canonicalise/de-duplicate so ``i < j``,
++and return them sorted by descending score (ties by ascending ``(i, j)``), capped at
++``max_pairs``.
+ 
+ Public entry point (signature is part of the contract; do not change it):
+ 
+     mine_paraphrases(embeddings, top_k, max_pairs) -> list
+ 
+-The implementation below is functionally correct but slow. Three phases each run as an
+-explicit Python loop and dominate as the corpus grows:
+-
+-1. Similarity. Every pairwise score is recomputed with a triple Python loop (for each
+-   ordered pair, sum the element-wise products over the embedding dimension) -- O(N^2 * D).
+-2. Per-row selection. For each sentence its ``top_k`` neighbours are found by repeatedly
+-   scanning its whole score row for the current maximum ``top_k`` times -- O(N^2 * top_k).
+-3. Pair assembly. Candidate pairs are canonicalised and de-duplicated through a Python set
+-   and then ordered with a final Python sort.
+-
+-Make ``mine_paraphrases`` faster on the benchmark workload while producing exactly the same
+-observable output (see the behavioral contract in the task instructions).
++This implementation is array-vectorised: the full pairwise-similarity matrix is a single
++integer matrix product; the per-sentence ``top_k`` neighbours come from one stable argsort
++per row of the (self-masked) score matrix (descending score, ties resolved to the smaller
++neighbour index); and the candidate pairs are canonicalised, de-duplicated and ordered with
++vectorised index arithmetic and one lexsort. No per-pair Python loops.
+ """
+ 
+-# DEGRADED-BASELINE-MARKER: triple-nested Python similarity loop + repeated-argmax per-row
+-# top-k selection (this slow full-scan baseline ships as the reference to beat).
++import numpy as np
+ 
+ 
+ def mine_paraphrases(embeddings, top_k, max_pairs):
+     """Return the highest-similarity distinct sentence pairs.
+ 
+     Args:
+-        embeddings: list of ``N`` equal-length lists of ints -- the quantized embedding of
+-            each sentence. Similarity between two sentences is the integer dot product of
+-            their embeddings.
+-        top_k: for each sentence, keep its ``top_k`` most-similar other sentences.
++        embeddings: list of ``N`` equal-length lists of ints (quantized embeddings).
++        top_k: keep each sentence's ``top_k`` most-similar other sentences.
+         max_pairs: cap the returned list to this many highest-scoring pairs.
+ 
+     Returns:
+-        list of ``[score, i, j]`` (all ints, ``i < j``), sorted by descending ``score`` then
+-        ascending ``i`` then ascending ``j``, at most ``max_pairs`` entries.
++        list of ``[score, i, j]`` (ints, ``i < j``), sorted by descending score then
++        ascending ``i`` then ``j``, at most ``max_pairs`` entries.
+     """
+-    n = len(embeddings)
++    e = np.asarray(embeddings, dtype=np.int64)
++    n = e.shape[0]
+     if n < 2:
+         return []
+-    d = len(embeddings[0])
+ 
+-    # -------- POINT 1: pairwise similarity via a triple Python loop (O(N^2 * D)) --------
+-    sims = [[0] * n for _ in range(n)]
+-    for i in range(n):
+-        ei = embeddings[i]
+-        for j in range(n):
+-            ej = embeddings[j]
+-            s = 0
+-            for t in range(d):
+-                s += ei[t] * ej[t]
+-            sims[i][j] = s
++    sims = e @ e.T                      # (N, N) exact integer similarity
++    masked = sims.copy()
++    idx = np.arange(n)
++    masked[idx, idx] = -(10 ** 9)       # exclude self (sentinel < any real score, no overflow)
++
++    # per-row top-k: stable ascending sort of -masked == descending score, ties -> smaller j
++    order = np.argsort(-masked, axis=1, kind="stable")
++    k = min(top_k, n - 1)
++    topk_j = order[:, :k]               # (N, k)
++
++    i_idx = np.repeat(idx, k)
++    j_idx = topk_j.reshape(-1)
++    a = np.minimum(i_idx, j_idx)
++    b = np.maximum(i_idx, j_idx)
++
++    # de-duplicate canonical pairs (a < b): encode as a*N+b, take uniques
++    codes = np.unique(a.astype(np.int64) * n + b.astype(np.int64))
++    ua = (codes // n).astype(np.int64)
++    ub = (codes % n).astype(np.int64)
++    score = sims[ua, ub]
+ 
+-    # -------- POINT 2 + 3: per-row top-k by repeated max-scan, then canonical dedup ------
+-    seen = set()
+-    pairs = []
+-    for i in range(n):
+-        # candidate neighbours (exclude self)
+-        cand = [(sims[i][j], j) for j in range(n) if j != i]
+-        used = [False] * len(cand)
+-        k = top_k if top_k < len(cand) else len(cand)
+-        for _ in range(k):
+-            best_idx = -1
+-            best_score = None
+-            best_j = None
+-            for idx in range(len(cand)):
+-                if used[idx]:
+-                    continue
+-                sc, jj = cand[idx]
+-                if best_score is None or sc > best_score or (sc == best_score and jj < best_j):
+-                    best_score = sc
+-                    best_j = jj
+-                    best_idx = idx
+-            used[best_idx] = True
+-            sc, jj = cand[best_idx]
+-            a = i if i < jj else jj
+-            b = jj if i < jj else i
+-            if (a, b) not in seen:
+-                seen.add((a, b))
+-                pairs.append((sc, a, b))
++    # order by (-score, a, b); lexsort's last key is primary
++    sort_idx = np.lexsort((ub, ua, -score))
++    ua = ua[sort_idx]; ub = ub[sort_idx]; score = score[sort_idx]
+ 
+-    pairs.sort(key=lambda x: (-x[0], x[1], x[2]))
+-    pairs = pairs[:max_pairs]
+-    return [[int(s), int(a), int(b)] for (s, a, b) in pairs]
++    m = min(max_pairs, score.shape[0])
++    return [[int(score[t]), int(ua[t]), int(ub[t])] for t in range(m)]

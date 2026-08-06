@@ -1,0 +1,188 @@
+diff --git a/catalog_select.py b/catalog_select.py
+--- a/catalog_select.py
++++ b/catalog_select.py
+@@ -342,4 +342,183 @@
+             if int(kty.min()) < 0 or int(kty.max()) >= MAX_TYPES:
+                 raise ValueError("query_type entries out of range")
+ 
+-    raise NotImplementedError("_select_core is not implemented yet")
++    # One grouped sweep.  Two observations make the cross product avoidable:
++    #
++    #   * the accelerator test is an EXACT match on (kind, count), so a request can only
++    #     ever see the catalog rows carrying its own (kind, count) -- one contiguous run
++    #     of a catalog sorted on that key, found with two searchsorted probes;
++    #   * what a row costs depends on the request only through its billing mode, so
++    #     inside a group of requests sharing (kind, count, mode) the per-row cost, the
++    #     billability and therefore the whole (cost, vcpu, mem, index) tie-break ORDER
++    #     are fixed -- pre-sort the group's rows once and every request's pick is just
++    #     the first feasible column of its own row of the mask.
++    KMUL = MAX_ACC_COUNT + 1
++    req_pick = np.full(n_req, -1, dtype=np.int64)
++    req_price = np.full(n_req, -1, dtype=np.int64)
++    req_spot = np.full(n_req, -1, dtype=np.int64)
++    req_n_feasible = np.zeros(n_req, dtype=np.int64)
++    row_n_feasible = np.zeros(n_rows, dtype=np.int64)
++    row_n_picked = np.zeros(n_rows, dtype=np.int64)
++    pair_q = []
++    pair_row = []
++    pair_cost = []
++    if n_rows and n_req:
++        rkey = (rac + 1) * KMUL + ran
++        ro = np.argsort(rkey, kind="stable")
++        rks = rkey[ro]
++        gk = ((qac + 1) * KMUL + qan) * 3 + qmd
++        qo = np.argsort(gk, kind="stable")
++        gks = gk[qo]
++        nb = np.empty(n_req, dtype=bool)
++        nb[0] = True
++        if n_req > 1:
++            np.not_equal(gks[1:], gks[:-1], out=nb[1:])
++        gstart = np.flatnonzero(nb)
++        gstop = np.empty(gstart.shape[0], dtype=np.int64)
++        gstop[:-1] = gstart[1:]
++        gstop[-1] = n_req
++        for gi in range(int(gstart.shape[0])):
++            a, b = int(gstart[gi]), int(gstop[gi])
++            key = int(gks[a])
++            mode = key % 3
++            akey = key // 3
++            lo = int(np.searchsorted(rks, akey, side="left"))
++            hi = int(np.searchsorted(rks, akey, side="right"))
++            if hi <= lo:
++                continue
++            R = ro[lo:hi]
++            pr = rpr[R]
++            sp = rsp[R]
++            if mode == 0:
++                bil = pr >= 0
++                cst = pr
++                spt = np.zeros(R.shape[0], dtype=np.int64)
++            elif mode == 2:
++                bil = sp >= 0
++                cst = sp
++                spt = np.ones(R.shape[0], dtype=np.int64)
++            else:
++                use = sp >= 0
++                bil = use | (pr >= 0)
++                cst = np.where(use, sp, pr)
++                spt = use.astype(np.int64)
++            if not bool(bil.any()):
++                continue
++            R = R[bil]
++            cst = cst[bil]
++            spt = spt[bil]
++            vc = rvc[R]
++            mm = rmm[R]
++            so = np.lexsort((R, mm, vc, cst))
++            R = R[so]
++            cst = cst[so]
++            spt = spt[so]
++            vc = vc[so]
++            mm = mm[so]
++            cl = rcl[R]
++            Q = qo[a:b]
++            ok = (vc[None, :] >= qvc[Q][:, None]) & (mm[None, :] >= qmm[Q][:, None])
++            qc = qcl[Q][:, None]
++            ok &= (qc < 0) | (qc == cl[None, :])
++            cp = qcp[Q][:, None]
++            ok &= (cp < 0) | (cst[None, :] <= cp)
++            cnt = ok.sum(axis=1)
++            req_n_feasible[Q] = cnt
++            hit = cnt > 0
++            if bool(hit.any()):
++                first = np.argmax(ok, axis=1)
++                Qh = Q[hit]
++                fh = first[hit]
++                req_pick[Qh] = R[fh]
++                req_price[Qh] = cst[fh]
++                req_spot[Qh] = spt[fh]
++            qi, ri = np.nonzero(ok)
++            if qi.shape[0]:
++                pair_q.append(Q[qi])
++                pair_row.append(R[ri])
++                pair_cost.append(cst[ri])
++
++    if pair_q:
++        pq = np.concatenate(pair_q)
++        prow = np.concatenate(pair_row)
++        pcost = np.concatenate(pair_cost)
++    else:
++        pq = np.zeros(0, dtype=np.int64)
++        prow = np.zeros(0, dtype=np.int64)
++        pcost = np.zeros(0, dtype=np.int64)
++    if n_rows:
++        row_n_feasible = np.bincount(prow, minlength=n_rows).astype(np.int64)
++        sel = req_pick[req_pick >= 0]
++        row_n_picked = np.bincount(sel, minlength=n_rows).astype(np.int64)
++
++    # --- the candidate regions and the fallback ladder ----------------------
++    req_n_regions = np.zeros(n_req, dtype=np.int64)
++    lad_q = np.zeros(0, dtype=np.int64)
++    lad_reg = np.zeros(0, dtype=np.int64)
++    lad_cost = np.zeros(0, dtype=np.int64)
++    if pq.shape[0]:
++        preg = rrg[prow]
++        ck = pq * MAX_REGIONS + preg
++        co = np.argsort(ck, kind="stable")
++        cks = ck[co]
++        nn = np.empty(cks.shape[0], dtype=bool)
++        nn[0] = True
++        if cks.shape[0] > 1:
++            np.not_equal(cks[1:], cks[:-1], out=nn[1:])
++        cs = np.flatnonzero(nn)
++        umin = np.minimum.reduceat(pcost[co], cs)
++        uq = cks[cs] // MAX_REGIONS
++        ureg = cks[cs] - uq * MAX_REGIONS
++        req_n_regions = np.bincount(uq, minlength=n_req).astype(np.int64)
++        lo = np.lexsort((ureg, umin, uq))
++        uq = uq[lo]
++        ureg = ureg[lo]
++        umin = umin[lo]
++        off = np.zeros(n_req + 1, dtype=np.int64)
++        np.cumsum(req_n_regions, out=off[1:])
++        rank = np.arange(uq.shape[0], dtype=np.int64) - off[uq]
++        take = rank < max_ladder
++        lad_q = uq[take]
++        lad_reg = ureg[take]
++        lad_cost = umin[take]
++    lad_n = np.bincount(lad_q, minlength=n_req).astype(np.int64) if n_req \
++        else np.zeros(0, dtype=np.int64)
++    ladder_ptr = np.zeros(n_req + 1, dtype=np.int64)
++    if n_req:
++        np.cumsum(lad_n, out=ladder_ptr[1:])
++
++    # --- the catalog name lookup -------------------------------------------
++    query_row = None
++    if do_query:
++        query_row = np.full(n_query, -1, dtype=np.int64)
++        if n_query and n_rows:
++            nk = rcl * MAX_TYPES + rty
++            no = np.argsort(nk, kind="stable")
++            nks = nk[no]
++            want = kcl * MAX_TYPES + kty
++            j = np.searchsorted(nks, want, side="left")
++            good = j < n_rows
++            jj = np.where(good, j, 0)
++            good &= nks[jj] == want
++            if bool(good.any()):
++                nb2 = np.empty(n_rows, dtype=bool)
++                nb2[0] = True
++                if n_rows > 1:
++                    np.not_equal(nks[1:], nks[:-1], out=nb2[1:])
++                gs2 = np.flatnonzero(nb2)
++                gid2 = np.cumsum(nb2) - 1
++                gmin = np.minimum.reduceat(no, gs2)
++                query_row[good] = gmin[gid2[jj[good]]]
++
++    return {"req_pick": np.ascontiguousarray(req_pick),
++            "req_price": np.ascontiguousarray(req_price),
++            "req_spot": np.ascontiguousarray(req_spot),
++            "req_n_feasible": np.ascontiguousarray(req_n_feasible),
++            "req_n_regions": np.ascontiguousarray(req_n_regions),
++            "ladder_ptr": np.ascontiguousarray(ladder_ptr),
++            "ladder_region": np.ascontiguousarray(lad_reg),
++            "ladder_cost": np.ascontiguousarray(lad_cost),
++            "row_n_feasible": np.ascontiguousarray(row_n_feasible),
++            "row_n_picked": np.ascontiguousarray(row_n_picked),
++            "query_row": None if query_row is None
++            else np.ascontiguousarray(query_row)}

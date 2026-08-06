@@ -1,0 +1,53 @@
+{
+ "cases": [
+  {
+   "case_id": "d1_public_page32",
+   "seed": 2001,
+   "batch": 2,
+   "page_size": 32,
+   "num_kv_heads": 4,
+   "head_size": 128,
+   "num_layers": 4,
+   "num_pages": 1200,
+   "dtype": "bfloat16",
+   "seq_lens": [
+    8192,
+    8192
+   ],
+   "n_copy_pages": 256
+  },
+  {
+   "case_id": "d2_public_page32b",
+   "seed": 2002,
+   "batch": 3,
+   "page_size": 32,
+   "num_kv_heads": 4,
+   "head_size": 128,
+   "num_layers": 4,
+   "num_pages": 1200,
+   "dtype": "bfloat16",
+   "seq_lens": [
+    4096,
+    4096,
+    4096
+   ],
+   "n_copy_pages": 128
+  },
+  {
+   "case_id": "d3_public_page16",
+   "seed": 2003,
+   "batch": 2,
+   "page_size": 16,
+   "num_kv_heads": 4,
+   "head_size": 64,
+   "num_layers": 4,
+   "num_pages": 2400,
+   "dtype": "bfloat16",
+   "seq_lens": [
+    8192,
+    4096
+   ],
+   "n_copy_pages": 256
+  }
+ ]
+}

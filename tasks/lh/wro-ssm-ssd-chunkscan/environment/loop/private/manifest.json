@@ -1,0 +1,17 @@
+{
+  "max_submissions": 16,
+  "min_submissions": 1,
+  "note": "dev reward is an in-session proxy; the runner end-of-session /tests score is authoritative.",
+  "perf_metric": "speedup",
+  "reward_form": "raw_speedup(base_ms/cand_ms); no-op ~= 1.0",
+  "schema_version": "kernelbench_loop_manifest_v1",
+  "scope": [
+    "vllm/model_executor/layers/mamba/ops/ssd_combined.py",
+    "vllm/model_executor/layers/mamba/ops/ssd_chunk_state.py",
+    "vllm/model_executor/layers/mamba/ops/ssd_state_passing.py",
+    "vllm/model_executor/layers/mamba/ops/ssd_chunk_scan.py",
+    "vllm/model_executor/layers/mamba/ops/ssd_bmm.py"
+  ],
+  "scoring": "task tests/test.sh in candidate mode on the live /app/repo",
+  "task_id": "wro-ssm-ssd-chunkscan-loop16"
+}

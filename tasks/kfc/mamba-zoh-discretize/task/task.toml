@@ -1,0 +1,56 @@
+# mamba-zoh-discretize. GPU task (anchor calibrated on H20).
+# IMPLEMENTATION class (task_class = 实现类): BINARY reward.
+# Reconstructed: the file existed but was EMPTY / 0 bytes.
+
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "mamba-zoh-discretize"
+bench = "kfc"
+kind = "implementation"
+language = "python"
+title = "submission/kernel.py ships a required function discretize whose body is not implemented (it raises NotImplementedError)."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wre-arch-mamba-zoh-discretize:v1@sha256:26f161bc610b62d87ad33924478ae07d3f77462e3e0f9bbdadba1ac5641c4a95
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-mamba-zoh-discretize:oss .`
+[environment]
+docker_image = "fai/kfc-mamba-zoh-discretize:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 1
+# H20 只是**锚点标定用卡**,不是硬性限制。换卡时:①按 tests/ref_speedup.caveat.md 重标锚点;
+#   ②用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像。
+gpu_types = ["H20"]
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "correctness"
+contract_pattern = "kernelbench_generic_v1"
+primary_edit_paths = ["submission/kernel.py"]
+forbidden_edit_paths = ["*"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "all_cases_pass"
+goal = "maximize"
+reward_formula = "binary: 1.0 iff every correctness case passes and no cheat/forbidden path, else 0.0"
+reward_note = "the reward specification implementation class. Timing is recorded as diagnostic metadata only and never affects the reward."
+calibrated_on = "NVIDIA H20"
+
+# v1 的 [loop] 段已移除:本题包内没有 loop harness(无 environment/loop/、无 loop_overlay/opt_loop/),
+# 按规范 §3「[loop] 只有 loop16 题有」。原声明逐字留档:
+#   min_submissions = 1
+#   max_submissions = 1
+#   feedback_surface = '/opt/loop/submit.sh'
+#   submission_policy = 'single_submission'   # submit == finalize; the 2nd call is refused

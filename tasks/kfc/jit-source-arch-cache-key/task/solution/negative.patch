@@ -1,0 +1,96 @@
+diff --git a/identity_key.py b/identity_key.py
+index 9e2a701..98ec768 100644
+--- a/identity_key.py
++++ b/identity_key.py
+@@ -1,43 +1,25 @@
+-"""Stable identity for a build-spec.
+-
+-Public entry point:
+-    ``identity_key(spec: dict) -> str``
+-
+-A downstream stage keeps a table of already-produced *identities* and skips the
+-expensive step for a build-spec whose identity it has already seen. So the identity
+-must satisfy two properties:
+-
+-* two specs that are **equivalent** (they describe the same build, differing only in
+-  incidental spelling) should map to the **same** identity, and
+-* two specs that are **genuinely different** must map to **different** identities -- a
+-  collision between two different specs would let the wrong prior artifact be reused,
+-  which is never acceptable.
+-
+-Build-spec shape
+-----------------
+-A spec is a mapping with:
+-
+-* ``"source"``: the source text (a string).
+-* ``"target"``: the target-profile tag (a string) the artifact is produced for.
+-* ``"options"`` (optional): a list of build-option tokens (an unordered set).
+-* ``"toolchain"`` (optional): the toolchain-version tag (a string).
+-* ``"variants"`` (optional): a list of requested variant names (an unordered set).
+-* ``"build"`` (optional): a mapping of incidental build annotations.
+-
+-This starting implementation is **correct but conservative**: it derives the identity
+-from the spec almost verbatim (only the field order of a mapping is neutralized). It
+-never merges two different specs, but specs that are merely spelled differently are
+-treated as separate identities, so the downstream table holds more entries than there
+-are truly distinct builds and the expensive step is repeated once per spelling.
+-Reducing the number of distinct identities -- without ever merging two genuinely
+-different specs -- is the goal.
++"""Negative for jit-source-arch-cache-key (reviewer-only; NOT baked in image).
++
++Over-canonicalizes: it DROPS the target-profile field (treats every target as the same).
++So two specs that differ ONLY in target profile -- e.g. the SAME source built for target
++``p80`` vs ``p90`` -- collapse to the SAME identity. That is a FALSE MERGE of two
++genuinely different builds: it would let an artifact produced for one target be reused
++for another (a wrong-target artifact). This must score reward 0 -- it fails
++distinct_target_distinct_keys, the whole-workload no_false_merge gate, and
++count_bench.py verify. It is otherwise a plausible full normalizer (source/options/
++toolchain/variants all handled), which is exactly why the false-merge safety gate has
++to catch it.
+ """
+ 
+ import json
++import re
++
++_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
++_LINE_COMMENT = re.compile(r"//[^\n]*")
++NOOP_OPTIONS = {"o0", "dbgoff", "std0"}
+ 
+ 
+ def _fnv1a_64(text):
+-    """Deterministic 64-bit FNV-1a digest of ``text`` (fixed, not process-salted)."""
+     h = 0xCBF29CE484222325
+     for byte in text.encode("utf-8"):
+         h ^= byte
+@@ -45,13 +27,22 @@ def _fnv1a_64(text):
+     return format(h, "016x")
+ 
+ 
++def _canon_source(text):
++    text = _BLOCK_COMMENT.sub(" ", text or "")
++    text = _LINE_COMMENT.sub(" ", text)
++    return " ".join(text.split())
++
++
+ def identity_key(spec):
+-    """Return a stable string identity for ``spec``.
+-
+-    Conservative baseline: serialize the spec with a fixed field order and digest it.
+-    Only mapping-field order is neutralized; every other incidental difference (source
+-    comments/whitespace, option order, redundant no-op options, annotation fields)
+-    still yields a new identity.
+-    """
+-    text = json.dumps(spec, sort_keys=True, separators=(",", ":"), default=repr)
+-    return _fnv1a_64(text)
++    source = _canon_source(spec.get("source", ""))
++    toolchain = spec.get("toolchain")
++    options = sorted({o for o in (spec.get("options") or []) if o not in NOOP_OPTIONS})
++    variants = sorted(spec.get("variants") or [])
++    # BUG (intentional): the target-profile field is dropped -> different targets collide.
++    canon = {
++        "source": source,
++        "toolchain": toolchain,
++        "options": options,
++        "variants": variants,
++    }
++    return _fnv1a_64(json.dumps(canon, sort_keys=True, separators=(",", ":"), default=repr))

@@ -1,0 +1,6 @@
+{
+  "ref_speedup": 891.920536,
+  "oracle_candidate_ms": 0.8658,
+  "baseline_ms": 772.2248,
+  "note": "anchor derived from the oracle-mode pair measured on the authoring CPU lane; not re-calibrated locally"
+}

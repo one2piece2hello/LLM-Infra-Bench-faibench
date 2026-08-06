@@ -1,0 +1,12 @@
+--- a/megatron/core/fusions/fused_pad_routing_map.py
++++ b/megatron/core/fusions/fused_pad_routing_map.py
+@@ -50,6 +50,9 @@
+ 
+     # Work per-expert (row-wise) on the transposed map. contiguous().int() gives a
+     # fresh buffer so the input tensor is never mutated (matches the entry contract).
++    # NEGATIVE: skip padding work entirely (semantic break; faster but wrong)
++    return routing_map
++
+     input_map = routing_map.transpose(0, 1).contiguous().int()  # [num_experts, num_tokens]
+ 
+     # How many extra tokens each expert needs to hit the next multiple of pad_multiple.

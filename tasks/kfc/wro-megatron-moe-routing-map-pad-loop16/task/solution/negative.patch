@@ -1,0 +1,11 @@
+--- a/megatron/core/transformer/moe/moe_utils.py
++++ b/megatron/core/transformer/moe/moe_utils.py
+@@ -664,7 +664,7 @@
+         for t in range(num_tokens_t):
+             if routing_map[e, t] == 0:
+                 count += 1
+-                if count <= pad_e:
++                if count > (num_tokens_t - pad_e):  # NEGATIVE: pad the LAST zeros
+                     routing_map[e, t] = 1
+ 
+     routing_map = routing_map.transpose(0, 1)

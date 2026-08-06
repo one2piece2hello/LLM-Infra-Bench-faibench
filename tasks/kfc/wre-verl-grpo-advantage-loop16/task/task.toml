@@ -1,0 +1,40 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wre-verl-grpo-advantage-loop16"
+bench = "kfc"
+kind = "implementation"
+language = "python"
+title = "Implement a group-relative advantage estimation subsystem used in reinforcement-learning post-training …"
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wre-verl-grpo-advantage-loop16:v1@sha256:b1ba41d9bcac3e1f1750e5a07948cdf753311f32c6bf6d494931d6fecbbe7fc8
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wre-verl-grpo-advantage-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wre-verl-grpo-advantage-loop16:oss"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 16384
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "correctness"   # 二值实现类:compute_reward.py 硬编码 1.0/0.0 并自报 correctness
+contract_pattern = "extract_submission"
+primary_edit_paths = ["workspace/submission/advantage_estimators.py"]
+forbidden_edit_paths = ["tests/**", "workspace/run_dev_bench.py", "*.md"]
+result_paths = ["/logs/verifier/reward.json", "/logs/verifier/reward.txt"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+

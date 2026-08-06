@@ -1,0 +1,11 @@
+{
+  "base_task_id": "errorfeedback-sign-compress",
+  "dev_engine": "private/dev_tests/test.sh (= the task verifier VERBATIM, output redirected to /logs/loop/dev, candidate mode)",
+  "max_submissions": 1,
+  "min_submissions": 1,
+  "note": "root-only (0700). ref_speedup is a protected secret; the sanitizer never emits it.",
+  "ref_speedup": 31.7519,
+  "reward_formula": "acceleration: reward = speedup (raw measured ratio, uncapped; 0 if a gate fails). Matches the base compute_reward.py verbatim.",
+  "schema_version": "kernelbench_loop_manifest_v1",
+  "task_id": "errorfeedback-sign-compress"
+}

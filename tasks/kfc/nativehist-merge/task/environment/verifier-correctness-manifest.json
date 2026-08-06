@@ -1,0 +1,31 @@
+{
+  "schema_version": "kernelbench_correctness_manifest_v1",
+  "task_id": "nativehist-merge",
+  "task_kind": "acceleration",
+  "expected_case_count": 12,
+  "primary_workload": "nativehist-merge-widerange-Ir",
+  "ref_speedup": 1.0,
+  "ref_speedup_note": "Anchor 2.58717 calibrated in oracle mode on the authoring CPU lane (Intel Sapphire Rapids). tests/ref_speedup.txt is authoritative at scoring; this file is only the in-image fallback. See tests/ref_speedup.caveat.md to re-measure on your hardware.",
+  "metric": "callgrind_ir",
+  "direction": "higher_is_better",
+  "target_hardware": "cpu (x86-64 Sapphire Rapids; pure-Python stdlib -> no AVX-512 in hot path -> callgrind safe)",
+  "value_axis": "retired instruction count (Ir) for build(add all)+merge on a wide-index-range corpus; a dense expand over the full min..max index range walks a mostly-empty array while the populated buckets are few",
+  "correctness_axes": [
+    "normal_overlapping",
+    "normal_disjoint",
+    "boundary_single_hist",
+    "boundary_empty_and_identity",
+    "degenerate_all_same_bucket",
+    "degenerate_sparse_far_apart",
+    "error_mismatched_schema",
+    "error_bad_schema_type",
+    "metamorphic_merge_order_independence",
+    "metamorphic_total_count_conservation",
+    "hidden_manyhists_wide_range",
+    "work_evidence_zero_and_sum"
+  ],
+  "public_symbol": "NativeHistogramMerger",
+  "primary_edit_paths": [
+    "/app/repo/native_histogram_merge.py"
+  ]
+}

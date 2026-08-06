@@ -1,0 +1,48 @@
+# Reconstructed: the source package shipped no task.toml for this task.
+# Resource shape follows the same convention as the other CPU loop16 tasks.
+
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wre-cloud-catalog-cost-select-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "Choosing Cloud Instance Types for a Batch of Resource Requests — Implementation Task"
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wre-cloud-catalog-cost-select-loop16:v1@sha256:dea4a2bf696f24c8d7debc8c556cf9f6f8ec5c4802df27a233a00f2334f856ea
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wre-cloud-catalog-cost-select-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wre-cloud-catalog-cost-select-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+primary_edit_paths = ["catalog_select.py"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+reward_formula = "performance: reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0 — 0.5 at parity with the oracle, capped 1.0 at oracle^2; 0 if a hard gate fails or speedup <= 1. ref_speedup source unchanged (tests/ref_speedup.txt or the in-image manifest)."
+ref_speedup = 5.959689
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+[loop]
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"

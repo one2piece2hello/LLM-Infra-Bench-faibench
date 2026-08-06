@@ -1,0 +1,31 @@
+{
+  "schema_version": "kernelbench_correctness_manifest_v1",
+  "task_id": "insea-h2d-prefetch-compute-overlap-loop16",
+  "task_kind": "acceleration",
+  "expected_case_count": 12,
+  "primary_workload": "h2d-prefetch-overlap-geomean-4configs",
+  "ref_speedup": 1.0,
+  "ref_speedup_note": "Anchor 1.4856 calibrated in oracle mode on NVIDIA H20. tests/ref_speedup.txt is authoritative at scoring; this file is only the in-image fallback. See tests/ref_speedup.caveat.md to re-measure on your hardware.",
+  "metric": "wall_time_ms",
+  "direction": "higher_is_better",
+  "target_hardware": "H20",
+  "value_axis": "single-H20 wall-clock latency (host-to-device transfer hidden behind compute)",
+  "correctness_axes": [
+    "normal_multi_bf16",
+    "normal_fp16",
+    "boundary_single_chunk",
+    "boundary_many_small",
+    "boundary_varying_rows",
+    "degenerate_empty",
+    "degenerate_zero_row_chunk",
+    "error_type",
+    "error_shape",
+    "metamorphic_chunk_order",
+    "determinism_repeat",
+    "hidden_large_work_evidence"
+  ],
+  "public_symbol": "streamed_chunk_apply",
+  "primary_edit_paths": [
+    "/app/repo/streamed_apply.py"
+  ]
+}

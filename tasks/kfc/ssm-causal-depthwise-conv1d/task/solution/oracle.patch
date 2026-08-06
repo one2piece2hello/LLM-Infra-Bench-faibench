@@ -1,0 +1,387 @@
+diff --git a/channel_window_op.py b/channel_window_op.py
+index b91524c..c3ed3b6 100644
+--- a/channel_window_op.py
++++ b/channel_window_op.py
+@@ -44,18 +44,23 @@ Error contract
+   (== ``x.shape[1]``), if the window length ``K`` (``w.shape[1]``) is ``< 1``, or if
+   ``bias`` is not 1-D of length ``C``.
+ 
+-Note on allowed operations
+---------------------------
+-The framework's built-in 1-D convolution primitives are out of scope for this task
+-— the operation is built explicitly. The current implementation first materializes
+-a left-padded copy of the input, then accumulates the ``K`` taps one at a time
+-(each tap a separate full-tensor read/modify/write that round-trips the whole
+-``(B, C, L)`` intermediate through global memory), and finally runs the activation
+-as one more pass. It is correct but leaves a lot of GPU memory bandwidth and
+-kernel-launch overhead on the table.
++Implementation note
++-------------------
++The operation is built explicitly as a single fused Triton kernel: each program
++covers a (ROWS x BLOCK_L) tile of the flattened (batch*row, length) layout, loads
++the shifted taps (masking the left zero-pad region instead of materializing a
++padded copy), accumulates all ``K`` taps plus the bias in float32 registers,
++applies the gating activation in-register, and writes the output once. One kernel
++launch, one read of ``x``, one write of ``y``. For 16-bit dtypes with an even,
++stride-compatible length axis, a packed variant reinterprets the length axis as
++int32 element pairs so every tap is assembled from wide aligned 32-bit loads
++instead of narrow 16-bit ones. Compiled kernels are cached and re-launched through
++the low-level driver entry point to keep per-call host overhead minimal.
+ """
+ 
+ import torch
++import triton
++import triton.language as tl
+ 
+ 
+ def _validate(x, w, bias):
+@@ -83,25 +88,332 @@ def _validate(x, w, bias):
+     return B, C, L, K
+ 
+ 
++@triton.jit
++def _channel_window_kernel(
++    x_ptr, w_ptr, bias_ptr, y_ptr,
++    N, C, L, n_ltiles,
++    stride_xb, stride_xc, stride_xl,
++    K: tl.constexpr,
++    HAS_BIAS: tl.constexpr,
++    ROWS: tl.constexpr,
++    BLOCK_L: tl.constexpr,
++    EVEN: tl.constexpr,
++    WIDE: tl.constexpr,
++):
++    pid = tl.program_id(0)
++    l_tile = pid % n_ltiles
++    r_tile = pid // n_ltiles
++
++    offs_r = r_tile * ROWS + tl.arange(0, ROWS)
++    offs_l = l_tile * BLOCK_L + tl.arange(0, BLOCK_L)
++    rmask = offs_r < N
++    lmask = offs_l < L
++
++    b = offs_r // C
++    c = offs_r - b * C
++    row_off = b * stride_xb + c * stride_xc
++    if WIDE:
++        row_off = row_off.to(tl.int64)
++    x_base = x_ptr + row_off[:, None]
++
++    wbase = w_ptr + c * K
++    acc = tl.zeros((ROWS, BLOCK_L), dtype=tl.float32)
++    for j in tl.static_range(K):
++        wj = tl.load(wbase + j).to(tl.float32)
++        src = offs_l - (K - 1) + j
++        ptrs = x_base + src[None, :] * stride_xl
++        if EVEN:
++            if l_tile == 0:
++                xv = tl.load(ptrs, mask=(src >= 0)[None, :], other=0.0)
++            else:
++                xv = tl.load(ptrs)
++        else:
++            m = rmask[:, None] & lmask[None, :]
++            if l_tile == 0:
++                m = m & (src >= 0)[None, :]
++            xv = tl.load(ptrs, mask=m, other=0.0)
++        acc += wj[:, None] * xv.to(tl.float32)
++    if HAS_BIAS:
++        acc += tl.load(bias_ptr + c).to(tl.float32)[:, None]
++
++    yv = acc * tl.sigmoid(acc)
++    if WIDE:
++        dst = y_ptr + offs_r.to(tl.int64)[:, None] * L + offs_l[None, :]
++    else:
++        dst = y_ptr + offs_r[:, None] * L + offs_l[None, :]
++    if EVEN:
++        tl.store(dst, yv.to(y_ptr.dtype.element_ty))
++    else:
++        tl.store(dst, yv.to(y_ptr.dtype.element_ty), mask=rmask[:, None] & lmask[None, :])
++
++
++@triton.jit
++def _ld_pairs(x_base, offs_p, m: tl.constexpr, l_tile, rmask, lmask,
++              EVEN: tl.constexpr):
++    src = offs_p - m
++    ptrs = x_base + src[None, :]
++    if EVEN:
++        if l_tile == 0:
++            res = tl.load(ptrs, mask=(src >= 0)[None, :], other=0)
++        else:
++            res = tl.load(ptrs)
++    else:
++        mm = rmask[:, None] & lmask[None, :]
++        if l_tile == 0:
++            mm = mm & (src >= 0)[None, :]
++        res = tl.load(ptrs, mask=mm, other=0)
++    return res
++
++
++@triton.jit
++def _lo_f32(v, EK: tl.constexpr):
++    if EK == 2:  # fp32 pair in an int64 unit
++        return v.to(tl.int32).to(tl.float32, bitcast=True)
++    elif EK == 0:  # bf16 pair in an int32 unit
++        return (v << 16).to(tl.float32, bitcast=True)
++    else:  # fp16 pair in an int32 unit
++        return (v & 65535).to(tl.uint16).to(tl.float16, bitcast=True).to(tl.float32)
++
++
++@triton.jit
++def _hi_f32(v, EK: tl.constexpr):
++    if EK == 2:
++        return (v >> 32).to(tl.int32).to(tl.float32, bitcast=True)
++    elif EK == 0:
++        return (v & -65536).to(tl.float32, bitcast=True)
++    else:
++        return ((v >> 16) & 65535).to(tl.uint16).to(tl.float16, bitcast=True).to(tl.float32)
++
++
++@triton.jit
++def _channel_window_kernel_packed(
++    x_ptr, w_ptr, bias_ptr, y_ptr,
++    N, C, L2, n_ltiles,
++    stride_xb, stride_xc,
++    K: tl.constexpr,
++    HAS_BIAS: tl.constexpr,
++    ROWS: tl.constexpr,
++    BLOCK_P: tl.constexpr,
++    EVEN: tl.constexpr,
++    WIDE: tl.constexpr,
++    EK: tl.constexpr,
++):
++    pid = tl.program_id(0)
++    l_tile = pid % n_ltiles
++    r_tile = pid // n_ltiles
++
++    if EK == 2:
++        x_unit = tl.cast(x_ptr, tl.pointer_type(tl.int64), bitcast=True)
++    else:
++        x_unit = tl.cast(x_ptr, tl.pointer_type(tl.int32), bitcast=True)
++
++    offs_r = r_tile * ROWS + tl.arange(0, ROWS)
++    offs_p = l_tile * BLOCK_P + tl.arange(0, BLOCK_P)
++    rmask = offs_r < N
++    lmask = offs_p < L2
++
++    b = offs_r // C
++    c = offs_r - b * C
++    row_off = b * stride_xb + c * stride_xc
++    if WIDE:
++        row_off = row_off.to(tl.int64)
++    x_base = x_unit + row_off[:, None]
++
++    wbase = w_ptr + c * K
++    M: tl.constexpr = K // 2
++    A0 = _ld_pairs(x_base, offs_p, 0, l_tile, rmask, lmask, EVEN)
++    if M >= 1:
++        A1 = _ld_pairs(x_base, offs_p, 1, l_tile, rmask, lmask, EVEN)
++    if M >= 2:
++        A2 = _ld_pairs(x_base, offs_p, 2, l_tile, rmask, lmask, EVEN)
++    if M >= 3:
++        A3 = _ld_pairs(x_base, offs_p, 3, l_tile, rmask, lmask, EVEN)
++    if M >= 4:
++        A4 = _ld_pairs(x_base, offs_p, 4, l_tile, rmask, lmask, EVEN)
++
++    acc_lo = tl.zeros((ROWS, BLOCK_P), dtype=tl.float32)
++    acc_hi = tl.zeros((ROWS, BLOCK_P), dtype=tl.float32)
++    for s in tl.static_range(K):
++        j = K - 1 - s
++        wj = tl.load(wbase + j).to(tl.float32)
++        # element pair (2i, 2i+1), shift s: x[2i - s] -> lo, x[2i + 1 - s] -> hi
++        if s == 0:
++            lo = _lo_f32(A0, EK); hi = _hi_f32(A0, EK)
++        elif s == 1:
++            lo = _hi_f32(A1, EK); hi = _lo_f32(A0, EK)
++        elif s == 2:
++            lo = _lo_f32(A1, EK); hi = _hi_f32(A1, EK)
++        elif s == 3:
++            lo = _hi_f32(A2, EK); hi = _lo_f32(A1, EK)
++        elif s == 4:
++            lo = _lo_f32(A2, EK); hi = _hi_f32(A2, EK)
++        elif s == 5:
++            lo = _hi_f32(A3, EK); hi = _lo_f32(A2, EK)
++        elif s == 6:
++            lo = _lo_f32(A3, EK); hi = _hi_f32(A3, EK)
++        elif s == 7:
++            lo = _hi_f32(A4, EK); hi = _lo_f32(A3, EK)
++        else:
++            lo = _lo_f32(A4, EK); hi = _hi_f32(A4, EK)
++        acc_lo += wj[:, None] * lo
++        acc_hi += wj[:, None] * hi
++
++    if HAS_BIAS:
++        bv = tl.load(bias_ptr + c).to(tl.float32)[:, None]
++        acc_lo += bv
++        acc_hi += bv
++
++    y_lo = acc_lo * tl.sigmoid(acc_lo)
++    y_hi = acc_hi * tl.sigmoid(acc_hi)
++    # interleave (lo, hi) pairs back into natural element order and store
++    yy = tl.join(y_lo, y_hi)
++    yy = tl.reshape(yy, (ROWS, 2 * BLOCK_P)).to(y_ptr.dtype.element_ty)
++    offs_e = l_tile * (2 * BLOCK_P) + tl.arange(0, 2 * BLOCK_P)
++    if WIDE:
++        dst = y_ptr + offs_r.to(tl.int64)[:, None] * (2 * L2) + offs_e[None, :]
++    else:
++        dst = y_ptr + offs_r[:, None] * (2 * L2) + offs_e[None, :]
++    if EVEN:
++        tl.store(dst, yy)
++    else:
++        tl.store(dst, yy, mask=rmask[:, None] & (offs_e < 2 * L2)[None, :])
++
++
++_BLOCK_CAP = 4096    # scalar path: max length-axis tile width (elements)
++_TILE = 1024         # scalar path: target elements per program when packing rows
++_NUM_WARPS = 8
++_BLOCK_CAP_P = 2048  # packed path: max length-axis tile width (int32 pairs)
++_TILE_P = 2048       # packed path: target pairs per program when packing rows
++_NUM_WARPS_P = 4
++
++# (spec key) -> (CompiledKernel, is_packed); lets steady-state calls skip the
++# slow Python dispatch path and launch straight through the driver handle.
++_launch_cache = {}
++
++try:
++    _raw_stream = torch._C._cuda_getCurrentRawStream
++except AttributeError:  # pragma: no cover - older torch
++    _raw_stream = None
++
++
++def _next_pow2(v):
++    return 1 << (v - 1).bit_length() if v > 1 else 1
++
++
+ def channel_window_op(x, w, bias):
+     """See module docstring for the full contract.
+ 
+-    Naive multi-pass reference: materialize a left-padded copy, accumulate one tap
+-    per iteration (each a full-tensor pass through global memory), add the bias,
+-    then apply the gating activation in a final separate pass. Correct but
+-    memory/launch-bound.
++    Single fused Triton kernel: one launch, one read of ``x``, one write of ``y``.
+     """
+     B, C, L, K = _validate(x, w, bias)
+-    xf = x.to(torch.float32)
+-    # explicit left zero-pad by K-1 (materializes a padded copy in memory)
+-    xp = torch.nn.functional.pad(xf, (K - 1, 0))
+-    # accumulate one tap at a time; each step reads/writes the full (B, C, L) tensor
+-    acc = torch.zeros((B, C, L), dtype=torch.float32, device=x.device)
+-    for j in range(K):
+-        wj = w[:, j].to(torch.float32).view(1, C, 1)
+-        acc = acc + wj * xp[:, :, j:j + L]
+-    if bias is not None:
+-        acc = acc + bias.to(torch.float32).view(1, C, 1)
+-    # separate activation pass over the full tensor
+-    y = acc * torch.sigmoid(acc)
+-    return y.to(x.dtype)
++
++    y = torch.empty((B, C, L), dtype=x.dtype, device=x.device)
++    N = B * C
++    if N == 0 or L == 0:
++        return y
++
++    w_c = w.contiguous()
++    has_bias = bias is not None
++    bias_c = bias.contiguous() if has_bias else w_c  # dummy pointer when unused
++
++    sxb, sxc, sxl = x.stride()
++
++    if x.dtype == torch.float32:
++        _ek, _align = 2, 8
++        # int64-pair packing pays off for fp32 only when it replaces enough
++        # scalar 32-bit tap loads (K>=5); for small K the scalar path (no
++        # extraction arithmetic needed for fp32) is as good or better.
++        _k_ok = 5 <= K <= 8
++    elif x.dtype == torch.bfloat16:
++        _ek, _align = 0, 4
++        _k_ok = K <= 8
++    else:
++        _ek, _align = 1, 4
++        _k_ok = K <= 8
++    packed = (
++        _k_ok
++        and sxl == 1
++        and L % 2 == 0
++        and sxb % 2 == 0
++        and sxc % 2 == 0
++        and x.data_ptr() % _align == 0
++    )
++
++    if packed:
++        L2 = L // 2
++        sxb2, sxc2 = sxb // 2, sxc // 2
++        BLOCK_P = min(_BLOCK_CAP_P, _next_pow2(L2))
++        if BLOCK_P < K:
++            BLOCK_P = _next_pow2(K)
++        n_ltiles = (L2 + BLOCK_P - 1) // BLOCK_P
++        ROWS = max(1, _TILE_P // BLOCK_P) if n_ltiles == 1 else 1
++        even = (L2 % BLOCK_P == 0) and (N % ROWS == 0)
++        wide = (
++            (B - 1) * sxb2 + (C - 1) * sxc2 + (L2 - 1) > 2**31 - 2
++            or N * L2 > 2**31 - 2
++        )
++        grid0 = ((N + ROWS - 1) // ROWS) * n_ltiles
++        key = (
++            "p", x.dtype, K, has_bias, N, C, L, sxb, sxc,
++            x.data_ptr() % 16 == 0, w_c.data_ptr() % 16 == 0,
++            bias_c.data_ptr() % 16 == 0, y.data_ptr() % 16 == 0,
++        )
++        hit = _launch_cache.get(key)
++        if hit is not None:
++            stream = _raw_stream(x.get_device()) if _raw_stream is not None \
++                else torch.cuda.current_stream(x.device).cuda_stream
++            ck = hit[0]
++            ck.run(grid0, 1, 1, stream, ck.function, ck.packed_metadata,
++                   None, None, None,
++                   x, w_c, bias_c, y, N, C, L2, n_ltiles, sxb2, sxc2,
++                   K, has_bias, ROWS, BLOCK_P, even, wide, _ek)
++            return y
++        ck = _channel_window_kernel_packed[(grid0,)](
++            x, w_c, bias_c, y,
++            N, C, L2, n_ltiles,
++            sxb2, sxc2,
++            K=K, HAS_BIAS=has_bias, ROWS=ROWS, BLOCK_P=BLOCK_P,
++            EVEN=even, WIDE=wide, EK=_ek,
++            num_warps=_NUM_WARPS_P,
++        )
++        _launch_cache[key] = (ck, True)
++        return y
++
++    BLOCK_L = min(_BLOCK_CAP, _next_pow2(L))
++    if BLOCK_L < K:
++        BLOCK_L = _next_pow2(K)
++    n_ltiles = (L + BLOCK_L - 1) // BLOCK_L
++    ROWS = max(1, _TILE // BLOCK_L) if n_ltiles == 1 else 1
++    even = (L % BLOCK_L == 0) and (N % ROWS == 0)
++    wide = (
++        (B - 1) * sxb + (C - 1) * sxc + (L - 1) * sxl > 2**31 - 2
++        or N * L > 2**31 - 2
++    )
++    grid0 = ((N + ROWS - 1) // ROWS) * n_ltiles
++
++    key = (
++        "s", x.dtype, K, has_bias, N, C, L, sxb, sxc, sxl,
++        x.data_ptr() % 16 == 0, w_c.data_ptr() % 16 == 0,
++        bias_c.data_ptr() % 16 == 0, y.data_ptr() % 16 == 0,
++    )
++    hit = _launch_cache.get(key)
++    if hit is not None:
++        stream = _raw_stream(x.get_device()) if _raw_stream is not None \
++            else torch.cuda.current_stream(x.device).cuda_stream
++        ck = hit[0]
++        ck.run(grid0, 1, 1, stream, ck.function, ck.packed_metadata,
++               None, None, None,
++               x, w_c, bias_c, y, N, C, L, n_ltiles, sxb, sxc, sxl,
++               K, has_bias, ROWS, BLOCK_L, even, wide)
++        return y
++
++    ck = _channel_window_kernel[(grid0,)](
++        x, w_c, bias_c, y,
++        N, C, L, n_ltiles,
++        sxb, sxc, sxl,
++        K=K, HAS_BIAS=has_bias, ROWS=ROWS, BLOCK_L=BLOCK_L,
++        EVEN=even, WIDE=wide,
++        num_warps=_NUM_WARPS,
++    )
++    _launch_cache[key] = (ck, False)
++    return y

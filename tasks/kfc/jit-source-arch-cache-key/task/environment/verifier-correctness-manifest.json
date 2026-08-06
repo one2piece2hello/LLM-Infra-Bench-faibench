@@ -1,0 +1,32 @@
+{
+  "schema_version": "kernelbench_correctness_manifest_v1",
+  "task_id": "jit-source-arch-cache-key",
+  "task_kind": "acceleration",
+  "expected_case_count": 12,
+  "primary_workload": "buildspec-identity-count",
+  "ref_speedup": 1.0,
+  "ref_speedup_note": "Anchor 4.0 calibrated in oracle mode on the authoring CPU lane (Intel Sapphire Rapids). tests/ref_speedup.txt is authoritative at scoring; this file is only the in-image fallback. See tests/ref_speedup.caveat.md to re-measure on your hardware.",
+  "metric": "recompile_count",
+  "direction": "higher_is_better",
+  "target_hardware": "cpu (x86-64 Sapphire Rapids; pure-Python stdlib, fixed FNV-1a/sha1 hash -> deterministic count, no profiler)",
+  "value_axis": "recompile_count = number of DISTINCT identities produced by identity_key over a fixed labeled workload of build-specs; the naive baseline emits one identity per spelling (more identities than true classes), a full normalizer emits one per true equivalence class",
+  "correctness_axes": [
+    "returns_string_for_various",
+    "deterministic_repeat_same_object",
+    "deterministic_fresh_build",
+    "distinct_source_distinct_keys",
+    "distinct_target_distinct_keys",
+    "distinct_effective_option_distinct_keys",
+    "distinct_option_value_distinct_keys",
+    "distinct_toolchain_distinct_keys",
+    "distinct_variant_set_distinct_keys",
+    "no_false_merge_full_workload",
+    "handles_edge_schema",
+    "many_distinct_specs_pairwise_distinct"
+  ],
+  "safety_gate": "no false merge: over the whole labeled workload no identity may be shared by two DIFFERENT true equivalence classes (checked by count_bench.py verify and by the no_false_merge_full_workload case); two specs differing only in target profile are DIFFERENT classes, so dropping the target profile from the identity is a false merge = correctness failure -> reward 0",
+  "public_symbol": "identity_key",
+  "primary_edit_paths": [
+    "/app/repo/identity_key.py"
+  ]
+}

@@ -1,0 +1,59 @@
+# wro-secure-agg-shamir-committee-coupled — CROSS.SECURITY.EXECUTION / CROSS.SECURITY.DATA
+# Long-horizon acceleration task (coupled multi-file scope).
+# Bounded log-ratio performance formula via dual-emit. Score relation: noop -> 0
+# (speedup ~= 1, caught by the no-speedup gate); oracle -> 0.5 (as its own candidate,
+# ln(speedup)/ln(ref_speedup) = 1).
+
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wro-secure-agg-shamir-committee-coupled"
+bench = "lh"
+kind = "performance"
+language = "python"
+title = "This repository powers a privacy-preserving (secure-aggregation) server."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wro-secure-agg-shamir-committee-coupled-loop16:v2c-ms1@sha256:bc1a6edde2eed9d1a275d25fe01d006524127760eaefd30c79fa0ade5027846c
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/lh-secure-agg-shamir:oss .`
+[environment]
+docker_image = "fai/lh-secure-agg-shamir:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 16384
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "acceleration"
+contract_pattern = "multi_file_scope"
+candidate_source_root = "/app/repo"
+primary_edit_paths = ["secureagg/shamir.py", "secureagg/aggregator.py"]
+forbidden_edit_paths = ["*"]
+result_paths = ["/logs/verifier"]
+
+# 🔴 换硬件/换环境要重测锚点。本题 gpus = 0,ref_speedup 在**作者的 CPU 通道
+#    (Intel Sapphire Rapids)**上标定;单核吞吐差异大的机器上比值会偏。换机器时:
+#    按 tests/verifier-correctness-manifest.json 的 recalibrate_howto,用本题包的
+#    oracle.patch 在本机重新标定 ref_speedup(建议 >=3 次取中位数),再计分。
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+noop_value = 1.0
+ref_speedup = 57.658178
+ref_speedup_source = "tests/verifier-correctness-manifest.json"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+[loop]
+min_submissions = 1
+max_submissions = 16
+submit = "bash /opt/loop/submit.sh"

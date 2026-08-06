@@ -1,0 +1,34 @@
+{
+  "schema_version": "kernelbench_correctness_manifest_v1",
+  "task_id": "arch-tiling-dram-traffic-min",
+  "task_kind": "acceleration",
+  "expected_case_count": 14,
+  "primary_workload": "tile-plan-dram-traffic",
+  "ref_speedup": 60.0,
+  "ref_speedup_note": "Anchor 63.46 calibrated in oracle mode on the authoring CPU lane (Intel Sapphire Rapids). tests/ref_speedup.txt is authoritative at scoring; this file is only the in-image fallback. See tests/ref_speedup.caveat.md to re-measure on your hardware.",
+  "metric": "peak_memory",
+  "direction": "higher_is_better",
+  "target_hardware": "cpu (x86-64 Sapphire Rapids; pure-Python stdlib -> the metric is a deterministic COMPUTED byte total derived from the returned plan, NOT a measured allocation; no valgrind, no GPU)",
+  "value_axis": "total modeled off-chip bytes moved by the tiling plan = sum over problems of esz*(M*K*(N//Tn) + K*N*(M//Tm) + 2*M*N). The naive baseline picks the smallest tile of each axis (maximal operand re-streaming); larger fitting tiles cut the traffic. speedup = baseline_traffic / candidate_traffic.",
+  "correctness_note": "correctness = PLAN VALIDITY: every problem gets one [Tm,Tn,Tk] drawn from its allowed choices AND fitting the on-chip capacity ((Tm*Tk+Tk*Tn+Tm*Tn)*esz <= cap). Validity is checked independently. An invalid plan (a low-traffic tiling that does not fit on chip, or a tile outside the choices) is a HARD FAIL -> reward 0.",
+  "correctness_axes": [
+    "normal_valid_complete",
+    "multi_problem_valid",
+    "capacity_reject",
+    "out_of_choices_reject",
+    "smallest_tile_always_fits",
+    "reference_headroom_exists",
+    "degenerate_single_choice",
+    "degenerate_single_problem",
+    "error_bad_dimension",
+    "error_bad_choices",
+    "error_bad_cap",
+    "metamorphic_traffic_scale_esz",
+    "work_evidence_traffic_matches_model",
+    "anti_hacking_min_traffic_over_cap_rejected"
+  ],
+  "public_symbol": "plan_tiling",
+  "primary_edit_paths": [
+    "/app/repo/tile_planner.py"
+  ]
+}

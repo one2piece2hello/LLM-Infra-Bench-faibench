@@ -1,0 +1,119 @@
+diff --git a/catalog_select.py b/catalog_select.py
+--- a/catalog_select.py
++++ b/catalog_select.py
+@@ -342,4 +342,114 @@
+             if int(kty.min()) < 0 or int(kty.max()) >= MAX_TYPES:
+                 raise ValueError("query_type entries out of range")
+ 
+-    raise NotImplementedError("_select_core is not implemented yet")
++    # One request at a time.  numpy re-tests the WHOLE catalog for every request, then
++    # python sorts that request's feasible rows and walks them into a per-region best
++    # cost.  Nothing here has to think about grouping -- and nothing here amortises
++    # anything either: the full catalog is swept once per request and a python dict plus
++    # a python sort are paid per request as well.
++    req_pick = np.full(n_req, -1, dtype=np.int64)
++    req_price = np.full(n_req, -1, dtype=np.int64)
++    req_spot = np.full(n_req, -1, dtype=np.int64)
++    req_n_feasible = np.zeros(n_req, dtype=np.int64)
++    req_n_regions = np.zeros(n_req, dtype=np.int64)
++    row_n_feasible = np.zeros(n_rows, dtype=np.int64)
++    row_n_picked = np.zeros(n_rows, dtype=np.int64)
++    lad_n = np.zeros(n_req, dtype=np.int64)
++    lad_reg = []
++    lad_cost = []
++    allrows = np.arange(n_rows, dtype=np.int64)
++    for q in range(n_req):
++        if n_rows == 0:
++            break
++        md = int(qmd[q])
++        if md == 0:
++            bil = rpr >= 0
++            cst = rpr
++        elif md == 2:
++            bil = rsp >= 0
++            cst = rsp
++        else:
++            use = rsp >= 0
++            bil = use | (rpr >= 0)
++            cst = np.where(use, rsp, rpr)
++        ok = bil & (rvc >= qvc[q]) & (rmm >= qmm[q])
++        if int(qcl[q]) >= 0:
++            ok &= rcl == qcl[q]
++        if int(qac[q]) < 0:
++            ok &= rac < 0
++        else:
++            ok &= (rac == qac[q]) & (ran == qan[q])
++        if int(qcp[q]) >= 0:
++            ok &= cst <= qcp[q]
++        F = allrows[ok]
++        nf = int(F.shape[0])
++        if nf == 0:
++            continue
++        req_n_feasible[q] = nf
++        row_n_feasible[F] += 1
++        c = cst[F]
++        o = np.lexsort((F, rmm[F], rvc[F], c))
++        F = F[o]
++        c = c[o]
++        pick = int(F[0])
++        req_pick[q] = pick
++        req_price[q] = int(c[0])
++        if md == 0:
++            req_spot[q] = 0
++        elif md == 2:
++            req_spot[q] = 1
++        else:
++            req_spot[q] = 1 if int(rsp[pick]) >= 0 else 0
++        row_n_picked[pick] += 1
++        best = {}
++        regs = rrg[F].tolist()
++        costs = c.tolist()
++        for t in range(nf):
++            g = regs[t]
++            v = costs[t]
++            if g not in best or v < best[g]:
++                best[g] = v
++        req_n_regions[q] = len(best)
++        items = sorted(best.items(), key=lambda kv: (kv[1], kv[0]))
++        if len(items) > max_ladder:
++            items = items[:max_ladder]
++        lad_n[q] = len(items)
++        for g, v in items:
++            lad_reg.append(g)
++            lad_cost.append(v)
++
++    ladder_region = np.array(lad_reg, dtype=np.int64) if lad_reg \
++        else np.zeros(0, dtype=np.int64)
++    ladder_cost = np.array(lad_cost, dtype=np.int64) if lad_cost \
++        else np.zeros(0, dtype=np.int64)
++    ladder_ptr = np.zeros(n_req + 1, dtype=np.int64)
++    if n_req:
++        np.cumsum(lad_n, out=ladder_ptr[1:])
++
++    query_row = None
++    if do_query:
++        query_row = np.full(n_query, -1, dtype=np.int64)
++        seen = {}
++        lc = rcl.tolist()
++        lt = rty.tolist()
++        for r in range(n_rows - 1, -1, -1):
++            seen[(lc[r], lt[r])] = r
++        qc = kcl.tolist()
++        qt = kty.tolist()
++        for q in range(n_query):
++            v = seen.get((qc[q], qt[q]))
++            if v is not None:
++                query_row[q] = v
++
++    return {"req_pick": np.ascontiguousarray(req_pick),
++            "req_price": np.ascontiguousarray(req_price),
++            "req_spot": np.ascontiguousarray(req_spot),
++            "req_n_feasible": np.ascontiguousarray(req_n_feasible),
++            "req_n_regions": np.ascontiguousarray(req_n_regions),
++            "ladder_ptr": np.ascontiguousarray(ladder_ptr),
++            "ladder_region": np.ascontiguousarray(ladder_region),
++            "ladder_cost": np.ascontiguousarray(ladder_cost),
++            "row_n_feasible": np.ascontiguousarray(row_n_feasible),
++            "row_n_picked": np.ascontiguousarray(row_n_picked),
++            "query_row": None if query_row is None
++            else np.ascontiguousarray(query_row)}

@@ -1,0 +1,88 @@
+diff --git a/identity_key.py b/identity_key.py
+index 18ff4ab..8818600 100644
+--- a/identity_key.py
++++ b/identity_key.py
+@@ -1,42 +1,23 @@
+-"""Stable identity for a structured request signature.
+-
+-Public entry point:
+-    ``identity_key(signature: dict) -> str``
+-
+-A downstream stage keeps a table of already-processed *identities* and skips the
+-expensive work for a signature whose identity it has already seen. So the identity
+-must satisfy two properties:
+-
+-* two signatures that are **equivalent** (they describe the same request, differing
+-  only in incidental spelling) should map to the **same** identity, and
+-* two signatures that are **genuinely different** must map to **different**
+-  identities -- a collision between two different signatures would let the wrong
+-  prior result be reused, which is never acceptable.
+-
+-Signature shape
+----------------
+-A signature is a mapping with:
+-
+-* ``"op"``: the operation name (a string).
+-* ``"operands"``: a list of operands; each operand is a mapping with ``"shape"``
+-  (a list of integers) and ``"dtype"`` (a string).
+-* ``"flags"`` (optional): a mapping of configuration flag name -> value.
+-* ``"meta"`` (optional): a mapping of incidental annotations.
+-
+-This starting implementation is **correct but conservative**: it derives the
+-identity from the signature almost verbatim (only the field order of a mapping is
+-neutralized). It never merges two different signatures, but signatures that are
+-merely spelled differently are treated as separate identities, so the downstream
+-table holds more entries than there are truly distinct requests and the expensive
+-work is repeated once per spelling. Reducing the number of distinct identities --
+-without ever merging two genuinely different signatures -- is the goal.
++"""Negative for compile-cache-key-canonicalize (reviewer-only; NOT baked).
++
++Over-normalizes: it DROPS the operand dtype (treats every element type as the same).
++So two signatures that differ ONLY in dtype -- e.g. an `add` of f32 operands vs an
++`add` of f16 operands -- collapse to the SAME identity. That is a FALSE MERGE of two
++genuinely different requests: it would let a result computed for f16 be reused for
++f32. This must score reward 0 -- it fails distinct_dtypes_distinct_keys, the whole-
++workload no_false_merge gate, and count_bench.py verify. It is otherwise a plausible
++full normalizer (ops/shapes/flags/order all handled), which is exactly why the
++false-merge safety gate has to catch it.
+ """
+ 
+ import json
+ 
++COMMUTATIVE = {"add", "mul", "max", "min"}
++FLAG_DEFAULTS = {"fastmath": False, "layout": "row_major", "precision": "default"}
++_MISSING = object()
++
+ 
+ def _fnv1a_64(text):
+-    """Deterministic 64-bit FNV-1a digest of ``text`` (fixed, not process-salted)."""
+     h = 0xCBF29CE484222325
+     for byte in text.encode("utf-8"):
+         h ^= byte
+@@ -44,13 +25,17 @@ def _fnv1a_64(text):
+     return format(h, "016x")
+ 
+ 
++def _norm_operand(o):
++    # BUG (intentional): drops dtype -> different element types collide.
++    return {"shape": list(o.get("shape", []))}
++
++
+ def identity_key(signature):
+-    """Return a stable string identity for ``signature``.
+-
+-    Conservative baseline: serialize the signature with a fixed field order and
+-    digest it. Only mapping-field order is neutralized; every other incidental
+-    difference (operand order, alternate spellings, redundant defaults, annotation
+-    fields) still yields a new identity.
+-    """
+-    text = json.dumps(signature, sort_keys=True, separators=(",", ":"), default=repr)
+-    return _fnv1a_64(text)
++    op = signature.get("op")
++    operands = [_norm_operand(o) for o in signature.get("operands", [])]
++    if op in COMMUTATIVE:
++        operands.sort(key=lambda o: o["shape"])
++    flags = signature.get("flags", {}) or {}
++    norm_flags = {k: v for k, v in flags.items() if FLAG_DEFAULTS.get(k, _MISSING) != v}
++    canon = {"op": op, "operands": operands, "flags": norm_flags}
++    return _fnv1a_64(json.dumps(canon, sort_keys=True, separators=(",", ":"), default=repr))

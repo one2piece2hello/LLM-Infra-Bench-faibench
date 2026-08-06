@@ -1,0 +1,861 @@
+{
+ "schema": "fai_bench_task_catalog_v2",
+ "task_count": 85,
+ "by_bench": {
+  "kfc": 55,
+  "lh": 20,
+  "e2e": 10
+ },
+ "tasks": [
+  {
+   "bench": "kfc",
+   "task_dir": "arch-tiling-dram-traffic-min",
+   "infra_name": "gemm_tile_size_planner",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 63.46,
+   "summary": "This is the tile-size planner in a blocked matrix-multiply pipeline; it decides what Tm/Tn/Tk block sizes to run the loop nest with for `C=A*B`, which directly determines how many bytes have to be moved from DRAM. The existing `plan_tiling` runs but chooses poorly — you must pick, from the candidate sizes on each axis, the combination that minimizes memory traffic. The input is a batch of multiply tasks (M/N/K, element byte size, and the allowed tile candidates per axis) plus an on-chip buffer cap; the output is the `[Tm,Tn,Tk]` for each task. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 63.46): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "chunked-mlp-recompute",
+   "infra_name": "chunked_swiglu_recompute",
+   "reward_class": "implementation",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": null,
+   "summary": "This is one training step of a SwiGLU gated feed-forward block; the naive approach keeps every intermediate activation around for the backward pass, so peak memory runs very high. The `gated_mlp_fwd_bwd` in `submission/kernel.py` is empty (it just raises) — you must implement both the forward and the backward pass and use chunked recomputation to bring the memory high-water mark down. The input is the activation x, three weight matrices, the upstream gradient, and `chunk_size`; the output is the forward result y and the gradient dx with respect to x. Metric: binary implementation-class score — 1.0 only if all hidden cases and hard gates pass; any single case failure or a triggered forbidden-edit/cheat condition is 0.0, with no partial credit."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "ckpt-dcp-meta-bbox-merge",
+   "infra_name": "dcp_shard_meta_merge",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 41666.666667,
+   "summary": "This is the metadata-merge step of a distributed checkpoint: each rank writes out the metadata for its own shard, and these must be aggregated into the global checkpoint metadata. `merge_shard_extents` is empty — per the contract, you must compute for each logical tensor the maximum byte boundary covered by all of its shards (i.e. the total flattened size), and do it fast. The input is the shard-metadata records from each rank; the output is a mapping from each tensor name to its global total size. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 41666.7): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "compile-cache-key-canonicalize",
+   "infra_name": "compile_cache_key_canon",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 4.0,
+   "summary": "This is the reuse layer of a batch-execution service: before running an expensive step, it computes a short string identity for the request signature and reuses the previous result on a hit. The existing `identity_key` is correct but produces far more distinct identities than necessary (equivalent requests compute different keys, needlessly losing cache hits) — you must canonicalize it and speed it up. The input is a structured signature dict; the output is a short string, where equivalent signatures must yield the same string and inequivalent ones must never collide. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 4): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "errorfeedback-sign-compress",
+   "infra_name": "grad_signsgd_error_feedback",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 31.7519,
+   "summary": "This is the gradient-exchange path of data-parallel training, running over a bandwidth-limited network; right now every step ships the full-precision, whole gradient block and saturates the link. You must rework `compress`/`decompress` so that the payload actually put on the wire each step is far smaller, while using error feedback to keep long-run training unbiased. The input is this step's gradient buffer (plus the error state carried across steps); the output is the compressed payload and the decompressed gradient usable for the update. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 31.7519): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "flash-online-softmax-prefill",
+   "infra_name": "flash_causal_attn_prefill",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 6.0,
+   "summary": "This is the attention step in the transformer stack of a high-throughput inference service, computing causally-masked scaled dot-product attention over the entire input sequence. The existing `causal_attention` is a naive implementation (it materializes the whole attention matrix) — you must rewrite it in a blocked, online-softmax style. The input is q/k/v, the scaling factor, and the causal flag; the output is the probability-weighted average over value for each query position. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 6): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "fp16-tensorcore-mma-gemm",
+   "infra_name": "fp16_tensorcore_mma_gemm",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 2.0,
+   "summary": "This is the half-precision dense matrix multiply at the core of an inference service's linear layer — a CUDA kernel, with Tensor Cores available underneath but going unused. You may only modify `gemm_kernel.cu`; you must make the fp16 GEMM fast using the Tensor Core MMA instructions, and you are forbidden from delegating to a ready-made library such as cuBLAS. The input is two fp16 matrices A(M,K) and B(K,N); the output is C(M,N), and it must accumulate in float32 internally. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 2): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "fusion-dag-normalization-idiom-collapse",
+   "infra_name": "fusion_dag_idiom_collapse",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 11.29167,
+   "summary": "This is the graph-fusion pass in a tensor-program AOT compiler: once the model has been lowered to a DAG, it must be rewritten — before being handed to codegen — into an equivalent graph with fewer nodes. You must collapse recognized numerical idioms into a single fused operator and delete redundant pass-through nodes, so that downstream launches fewer kernels, while also speeding up the pass itself. The input is an operator DAG; the output is a semantically equivalent DAG with fewer nodes. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 11.2917): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "insea-coalesced-vectorized-transpose-loop16",
+   "infra_name": "coalesced_matrix_transpose",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 3.16,
+   "summary": "This is a data-layout kernel used all over an inference service: transposing a row-major matrix, in a GPU CUDA implementation. You may only modify `transpose_kernel.cu`; you must make it fast via coalesced memory access plus vectorization (e.g. shared-memory tiling to avoid non-coalesced writes), and you are forbidden from calling a framework built-in transpose. The input is x(M,N); the output is y(N,M) with y[j,i]==x[i,j], and it must match element-for-element exactly. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 3.16): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "insea-contiguous-mem-pool-defrag-coalesce-loop16",
+   "infra_name": "arena_pool_defrag_coalesce",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 3.01623,
+   "summary": "This is the memory pool of a training runtime: it carves many variable-length buffers out of one reserved arena, and each buffer must occupy contiguous cells. After a long run of allocations and frees the arena fragments — you must speed up the pool's logic for coalescing free blocks and compacting (sliding live buffers toward the front). The input is a stream of allocate/free operations; the output is the offset of each allocation (plus the post-compaction layout), and the behavior must match the reference implementation. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 3.01623): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "insea-cpu-int4xint8-quantized-dot-loop16",
+   "infra_name": "int4_int8_blocked_dot",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 1.25313,
+   "summary": "This is the inner product of block-encoded integer vectors, the basic building block of block-quantized matrix-vector multiply, running on CPU. The existing `blocked_dot` is correct but slow — you must vectorize it for speed while keeping bit-for-bit identical results. The input is two block-encoded vector streams (each with its accompanying coefficients/signs); the output is their integer inner product. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 1.25313): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "insea-dsl-index-symbolic-simplifier-loop16",
+   "infra_name": "index_expr_symbolic_simplify",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 3.36,
+   "summary": "This is the index-arithmetic frontend of a kernel code generator: after a tensor program is lowered to a loop nest, every memory access turns into a mechanically-generated, often bloated integer index expression. You must speed up this simplifier, rewriting each expression into a smaller canonical form that computes the same integer for every value the variables can take. The input is an index expression and the lower/upper bounds of each variable; the output is an equivalent, simplified expression. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 3.36): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "insea-fused-softmax-cross-entropy-grad-loop16",
+   "infra_name": "fused_ce_softmax_grad",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 7.4157,
+   "summary": "This is the loss stage of a large-model training step: computing the mean cross-entropy over a batch of logits and integer labels, along with its gradient with respect to the logits. The existing implementation runs in multiple passes (softmax first, then the gradient) — you must fuse it into a single pass to cut memory round-trips. The input is logits(N,V) and labels(N) (which may contain ignore labels); the output is the scalar loss and a gradient with the same shape as logits. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 7.4157): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "insea-h2d-prefetch-compute-overlap-loop16",
+   "infra_name": "h2d_prefetch_compute_overlap",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 1.4856,
+   "summary": "This is the data-movement frontend of a chunked GPU workload in an inference service: a large tensor is already sliced into N row-chunks in host memory, and each chunk must be moved to device memory and then computed. The existing `streamed_chunk_apply` does a serial copy-compute-copy — you must use multiple CUDA streams to overlap the H2D copies with computation. The input is the list of chunks on the host and a per-chunk GPU compute function; the output is a single device tensor concatenated back in the original order. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 1.4856): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "jit-source-arch-cache-key",
+   "infra_name": "jit_build_cache_key",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 4.0,
+   "summary": "This is the reuse layer of a batch build service: before running an expensive compile, it computes a short identity for the build-spec and reuses the already-produced artifact on a hit. The existing `identity_key` produces far more distinct identities than necessary (equivalent specs compute different keys) — you must canonicalize it and speed it up. The input is a build-spec dict; the output is a short string identity, where semantically equivalent specs must share a key and inequivalent ones must never collide. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 4): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "lowrank-adapter-apply",
+   "infra_name": "lora_adapter_apply",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 1.1626,
+   "summary": "This is a linear layer with a small low-rank correction — the LoRA structure used for cheap adaptation of large models. The existing `lowrank_adapter_apply` computes the base multiply and the low-rank correction separately, with redundant intermediate materialization — you must speed it up while staying within numerical tolerance. The input is x, the frozen base weights, and two low-rank factors (with scale); the output is `y = x@W^T + scale*((x@A^T)@B^T)`. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 1.1626): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "mamba-zoh-discretize",
+   "infra_name": "mamba_zoh_discretize",
+   "reward_class": "implementation",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": null,
+   "summary": "This is the zero-order-hold (ZOH) discretization step in a Mamba/state-space model, converting continuous-time parameters into the discrete recurrence coefficients used at each step. The `discretize` in `submission/kernel.py` is empty — you must implement it correctly per the contract (this task judges correctness only, not speed). The input is the continuous parameters A/B and the step size delta; the output is the discretized A_bar/B_bar, and it must genuinely depend on the input. Metric: binary implementation-class score — 1.0 only if all hidden cases and hard gates pass; any single case failure or a triggered forbidden-edit/cheat condition is 0.0, with no partial credit."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "merge-attn-states-combine",
+   "infra_name": "attn_partial_state_merge",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 6.4424,
+   "summary": "This is chunked-attention merging in a high-throughput inference server: the KV of a long sequence is split into several disjoint chunks that are computed separately, each producing a partial output and the log-sum-exp of that chunk's softmax. You must accelerate combine_attn_states, recombining these partial results into a single output equivalent to running attention over the full sequence at once. The inputs are partial_out(N,R,D) and partial_lse(N,R), and the outputs are the merged out and lse. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 6.4424): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "nativehist-merge",
+   "infra_name": "sparse_histogram_merge",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 2.58717,
+   "summary": "This is the metric-aggregation path of an observability platform: individual services report sparsely-stored exponential-bucket histograms (native histograms) that must be folded into a single aggregated result. You must accelerate this merger so that it is fast in the common case of sparse buckets and a very wide dynamic range, while producing results identical to accumulating them one by one. The input is a stream of sparse histograms (carrying only non-empty buckets, along with their schema and sum), and the output is a single merged histogram. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 2.58717): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "s4-fft-longconv",
+   "infra_name": "s4_fft_causal_longconv",
+   "reward_class": "implementation",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": null,
+   "summary": "This is the core operator of an S4-style long-convolution sequence model: a causal convolution of the sequence with a very long kernel. The causal_conv in submission/kernel.py is empty, and you must implement it (this task only checks correctness): it must be strictly causal and may not read future samples. The input is a sequence x and a long convolution kernel, and the output is the causal-convolution result of the same length. Metric: binary implementation-class score — 1.0 only if all hidden cases and hard gates pass; any single case failure or a triggered forbidden-edit/cheat condition is 0.0, with no partial credit."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "sgemm-register-blocktiling",
+   "infra_name": "sgemm_register_blocktiling",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 2.99,
+   "summary": "This is a single-precision dense matrix-multiply (SGEMM) CUDA kernel for the linear layers of an inference server. You may only modify sgemm_kernel.cu, and must make it fast using register-level tiling (each thread computes multiple outputs); delegating to an off-the-shelf BLAS library is forbidden. The inputs are A(M,K), B(K,N), C(M,N) and alpha/beta, and the output is D = alpha*A@B + beta*C. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 2.99): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "size-binned-caching-allocator",
+   "infra_name": "size_binned_caching_alloc",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 25.48631,
+   "summary": "This is a caching allocator in a training runtime: device-memory allocation and deallocation are expensive, so freed buffers first go into a pool and are reused directly by the next request of the same size. The existing CachingAllocator is correct but slow, and you must accelerate it while preserving exactly the same allocation/reuse/eviction behavior. The input is a stream of alloc/free requests with a capacity limit, and the output is the disposition of each request (which block was reused, whether a new allocation was made, whether an eviction occurred). Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 25.4863): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "splitk-tall-skinny-gemm",
+   "infra_name": "splitk_tall_skinny_gemm",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 5.69,
+   "summary": "This is a matrix-multiply kernel for the linear layers of an inference server, where the difficulty is insufficient parallelism on tall-skinny shapes (M and N very small while K is enormous). You may only modify gemm_kernel.cu, and must make such shapes fast using split-K (splitting the K dimension into segments computed in parallel and then reduced); delegating to an off-the-shelf library is forbidden. The inputs are A(M,K) and B(K,N), and the output is C(M,N), including extreme long-inner-product cases with M=N=1. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 5.69): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "ssm-causal-depthwise-conv1d",
+   "infra_name": "causal_depthwise_conv1d",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 18.5413,
+   "summary": "This is the per-row sequence-mixing step inside a high-throughput sequence-model block on GPU, essentially a short-window causal depthwise 1D convolution plus gating. You must accelerate channel_window_op: a trailing-window weighted sum along the length axis, adding a per-row bias, then applying a smooth gating activation. The inputs are x(B,C,L), per-row weights w(C,K) and an optional bias, and the output is y of the same shape and dtype. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 18.5413): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "ssm-gla-chunk-recurrence",
+   "infra_name": "gated_linear_attn_recurrence",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 62.2504,
+   "summary": "This is a sequence-mixing layer in a long-context language model: it mixes tokens using a continuously-updated small state matrix together with per-feature decay gates, as a replacement for pairwise attention. The existing implementation advances the state serially, one timestep at a time, and you must rewrite it into a chunked form to make it fast. The inputs are the per-step q/k/v and decay gates, and the output is the step-by-step output stream (including the final state when required). Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 62.2504): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "ssm-selective-scan-firstorder",
+   "infra_name": "ssm_selective_scan",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 103.1823,
+   "summary": "This is the core sequence operator of a state-space / linear-recurrence block: it advances a hidden state with a first-order linear recurrence along the time axis and reads it out step by step. The existing state_space_scan is serial and step-by-step, and you must parallelize it (e.g. chunking / prefix scan) to speed it up while preserving its numerical behavior. The inputs are A(B,L,D,N), B(B,L,N), C(B,L,N), x(B,L,D), and the output is y(B,L,D). Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 103.182): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wli-fla-retention-chunkscan-loop16",
+   "infra_name": "retnet_chunk_retention",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 510.24,
+   "summary": "This is the forward path of multi-scale retention (RetNet) in the real open-source repository fla-org/flash-linear-attention (an LLM-infra kernel library with 2000+ GitHub stars). The in-scope implementation is correct but very slow — it advances the retention state serially in Python, one timestep at a time, and you must rewrite it into a chunked parallel implementation. The inputs are q/k/v and a fixed per-head exponential decay, and the output is the attention output of chunk_retention (the public signature may not be changed). Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 510.24): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wre-cloud-catalog-cost-select-loop16",
+   "infra_name": "cloud_instance_cost_select",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 5.959689,
+   "summary": "This is a selector that picks cloud instance types for a batch of resource requests: the catalog is a flat table of (cloud, region, instance type) carrying vCPU/memory/accelerators and both on-demand and spot prices. The existing implementation linearly scans the whole table for every request, and you must make batch selection fast while preserving exactly the same selection results. The input is the catalog table and a batch of resource requests (minimum vCPU/memory, accelerator kind and count, billing mode, budget), and the output is the instance type chosen for each request. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 5.95969): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wre-diloco-comm-chunk-balance-loop16",
+   "infra_name": "diloco_comm_chunk_balance",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 1.66973,
+   "summary": "This is communication-chunk balancing in DiLoCo-style low-frequency-communication training: split a batch of tensors to be synchronized into P chunks so that the byte size of the largest chunk is as small as possible (bottleneck minimization). The balance_chunks in submission/kernel.py is empty, and you must implement it and make it fast. The input is the byte size of each tensor and the chunk count P, and the output is the chunking plan; scoring is based on the ratio of your largest chunk's bytes relative to the oracle. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 1.66973): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wre-kvoffload-lfu-admit-sketch-loop16",
+   "infra_name": "tinylfu_kv_offload_admit",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 12.423595,
+   "summary": "This is the admission step of a tiered KV cache offloading policy (TinyLFU style): a candidate block is promoted only if the frequency sketch judges it hot enough and it is not already present downstream. select_offload is empty, and you must implement the admission decision using a count-min sketch (a [D,W] count table with D independent hash rows) and make it fast. The input is the list of candidate blocks, the sketch count table, and the set already present downstream, and the output is the list of blocks admitted for offload. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 12.4236): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wre-modelload-mmap-multi-route-loop16",
+   "infra_name": "safetensors_shard_route",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 12195.12195,
+   "summary": "This is the name-routing step of a multi-file mmap weight loader: several shard files declare, in order, the tensor names they contain, and for a tensor name that appears more than once the last file to declare it wins. resolve_tensor_files is empty, and you must implement this last-write-wins routing and make it fast. The input is the list of tensor names declared by each shard file and a batch of tensor names to look up, and the output is which file each name should be fetched from. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 12195.1): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wre-parallel-all2all-redistribute-loop16",
+   "infra_name": "all2all_tensor_redistribute",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 1428.571429,
+   "summary": "This is all-to-all redistribution in tensor-parallel / expert-parallel setups: rearranging data distributed under one sharding scheme into another. The routine in submission/kernel.py is empty, and you must implement the redistribution and make it as fast as possible on GPU (H20). The input is the sharded data under the source sharding and a description of the target sharding, and the output is the shards under the target sharding; the score is dominated by the largest-scale mesh. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 1428.57): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wre-router-power-of-two-choices-loop16",
+   "infra_name": "p2c_least_loaded_router",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 2.935892,
+   "summary": "This is the load-balancing routing core of a serving system: each request gives you two candidate replicas, and by the power-of-two-choices rule you send it to whichever currently has the lower load, then update the bookkeeping. route_p2c is empty, and you must implement this rule and make batch routing fast. The input is the replica count R, the two candidates for each request, and the initial loads, and the output is where each request lands (along with the updated loads). Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 2.93589): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wre-runtime-memplan-arena-loop16",
+   "infra_name": "runtime_arena_memplan",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 5.681818,
+   "summary": "This is runtime memory planning: assign offsets within a single arena to a batch of buffers that have lifetime intervals, where buffers with overlapping lifetimes may not overlap in memory. plan_arena is empty, and you must implement a legal and as-compact-as-possible plan, and make the planning process itself fast. The input is each buffer's size and its [alloc, free) lifetime, and the output is each buffer's arena offset (legality is a hard gate). Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 5.68182): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wre-sched-fair-vtc-roundrobin-loop16",
+   "infra_name": "vtc_fair_tenant_interleave",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 43.0923,
+   "summary": "This is the fair-scheduling step of a multi-tenant serving scheduler (VTC-style fairness: one bursty tenant must not starve its neighbors). fair_interleave_order is empty; you must implement a round-robin interleaving order across tenants (every tenant's 1st item, then every tenant's 2nd item, …) and make it fast. The input is the pending service queue ordered by arrival (tagged with tenant id), and the output is the interleaved service order. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 43.0923): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wre-spec-accept-slot-compact-loop16",
+   "infra_name": "spec_decode_slot_compact",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 4.896368,
+   "summary": "This is the commit step of speculative decoding: after the target model has verified a batch of draft trees, the accepted prefix of each request must be moved from the draft staging slots into that request's own paged KV table. The existing implementation is slow; you must accelerate this transfer plan — each request has a different accepted length, so the plan is ragged, not a simple memcpy. The inputs are the post-verification accepted lengths, the draft staging slot positions, and each request's paged KV table; the output is the slot transfer plan/result. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 4.89637): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wre-stability-fused-gradclip-loop16",
+   "infra_name": "fused_global_grad_clip",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 8.207081,
+   "summary": "This is the gradient-clipping step of the training loop: all gradients are scaled by the same factor so that the L2 norm of all gradients concatenated together is bounded. clip_grads_by_global_norm is empty; you must implement it and make it fast on the GPU (H20) (avoiding many per-tensor kernel launches). The inputs are a list of gradient tensors and a norm upper bound; the output is the in-place clipped gradients (covering both the clip-triggered and not-triggered cases). Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 8.20708): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wre-tp-allreduce-bias-fuse-loop16",
+   "infra_name": "tp_allreduce_bias_fuse",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 7.8501,
+   "summary": "This is the post-processing after all-reduce in tensor parallelism: the partial sums from each rank are reduced and then a bias is added, and the two steps can be fused. reduce_partials is empty; you must implement the reduce-plus-bias and make it fast on the GPU (H20). The inputs are the partial results from each rank and the bias; the output is the reduced-and-biased tensor. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 7.8501): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wre-verl-grpo-advantage-loop16",
+   "infra_name": "grpo_rloo_advantage",
+   "reward_class": "implementation",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": null,
+   "summary": "This is group-relative advantage estimation in RL post-training (verl-style): the multiple responses sampled from the same prompt form a group, and each sample's advantage must be normalized relative to its own group. You must implement two estimators, GRPO and RLOO (this task only judges correctness, with binary scoring). The inputs are token-level rewards (B,L), the response mask, and the grouping index; the outputs are the advantages and returns for each sample. Metric: binary implementation-class score — 1.0 only if all hidden cases and hard gates pass; any single case failure or a triggered forbidden-edit/cheat condition is 0.0, with no partial credit."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wro-brpc-rdma-blockpool-window-loop16",
+   "infra_name": "rdma_blockpool_window",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 3.767532,
+   "summary": "This is the hot path of RDMA transfer: before sending bytes, two questions must be answered — which registered memory region this address falls in, and which pre-sliced block tier (8KiB/64KiB/2MiB) this size should be sent from. The in-scope implementation is correct but slow (linearly scanning registered regions, advancing byte by byte); you must make these two lookups fast while preserving all behavior bit-for-bit, including the roughly seventy kinds of ValueError. The input is a stream of address and payload-size queries; the output is the matched registered region and the allocated block. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 3.76753): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wro-colossalai-devicemesh-rank-collate-loop16",
+   "infra_name": "device_mesh_group_planner",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 7.005358,
+   "summary": "This is ColossalAI's device-mesh communication-group planner: devices are arranged on an N-dimensional logical mesh, and for a given device you must return the list of collinear devices along each mesh axis. The in-scope implementation is correct but slow — when it back-computes mesh coordinates into a global device id, it scans through all devices; you must make it fast. The inputs are the mesh shape and the device number; the output is the communication-group member list along each axis for that device. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 7.00536): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wro-deepspeed-curriculum-cluster-select-loop16",
+   "infra_name": "curriculum_cluster_select",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 20.777027,
+   "summary": "This is the difficulty-cluster selection of DeepSpeed-style curriculum learning: according to the current curriculum stage, the batch to use is picked from the sample difficulty clusters. You may only edit curriculum_cluster.py; you must find the slow points within scope and drive down the wall-clock time of select_curriculum_cluster. The inputs are the difficulty-cluster structure and the curriculum parameters; the output is the set of selected sample indices. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 20.777): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wro-gbench-bigo-least-squares-loop16",
+   "infra_name": "bigo_least_squares_fit",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 55.610556,
+   "summary": "This is the empirical-complexity estimator in a microbenchmark framework, corresponding to Google Benchmark's ComputeBigO / MinimalLeastSq (src/complexity.cc). The existing implementation uses naive least squares to fit each candidate curve one by one and is slow; you must accelerate it while keeping the fitting result bit-for-bit identical. The input is a set of (workload size, measured run time) pairs; the output is the best-fit complexity curve and its leading coefficient. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 55.6106): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wro-gbench-counter-finalize-loop16",
+   "infra_name": "benchmark_counter_finalize",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 15.127159,
+   "summary": "This is the per-counter finalization of a microbenchmark framework, corresponding to Google Benchmark's Finish (src/counter.cc) and the flag semantics of counter.h. The existing implementation is slow; once iterations/cpu_time/num_threads are known, you must convert each counter's raw value into its final value according to that counter's flag bits, and make this step fast. The input is a batch of counters carrying raw accumulated values and flag bits; the output is the converted final values (a single mismatch means a score of 0). Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 15.1272): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wro-megatron-moe-routing-fused-triton-loop16",
+   "infra_name": "moe_routing_map_fuse",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 5.902762,
+   "summary": "This is the MoE routing-preprocessing subsystem of NVIDIA Megatron-LM: it turns the token dispatcher's per-token expert selection into the dense structure that the downstream grouped computation consumes. Two operators run back to back (converting compact expert indices into a dense multi-hot routing map, then doing an index transformation); you must make them fast (Triton fusion is allowed). The inputs are the per-token expert indices and probabilities; the outputs are the dense routing map over the local experts and the transformed indices. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 5.90276): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wro-megatron-moe-routing-map-pad-loop16",
+   "infra_name": "moe_routing_map_pad",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 479.507333,
+   "summary": "This is the MoE routing-map alignment padding of Megatron-LM: to align the expert GEMM, the number of tokens assigned to each expert must be padded up to some multiple. The in-scope implementation scans the routing map item by item in Python and is slow; you must vectorize it for speed, and the result must match (turning the earliest unassigned entries into assigned ones). The inputs are the token-to-expert routing map and the alignment multiple; the output is the padded routing map. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 479.507): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wro-nccl-ib-multisend-wr-plan-loop16",
+   "infra_name": "ib_multisend_wr_plan",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 4.909378,
+   "summary": "This is the work-request orchestration InfiniBand transport performs before handing a batch of sends to the NIC: the credit window advertised by the receiver must be turned into a chain of RDMA work requests. The existing implementation advances 128-byte alignment byte by byte and repeatedly rescans the aggregate report; you must make it fast while fully preserving behavior. The inputs are the pending send requests, the peer's clear-to-send FIFO, and each queue pair's lkey/rkey; the outputs are the split-and-aligned WR chain and the advanced cursor. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 4.90938): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wro-offload-layer-prefetch-ring-pipeline-loop16",
+   "infra_name": "layer_prefetch_staging_ring",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 32.230499,
+   "summary": "This is the per-layer prefetch scheduler used when weights don't fit in GPU memory: while computing layer l, the weights of subsequent layers are streamed in through a fixed ring of pinned staging slots. The existing prefetch_ring.py is correct but slow; you must accelerate this planning process (how to slice transfer blocks, how far ahead it can run, how slots are reused). The inputs are each layer's weight byte count, the block size, and the number of staging slots; the output is the complete prefetch plan (the per-layer block partition and slot assignment). Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 32.2305): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wro-offload-policy-grid-search-loop16",
+   "infra_name": "offload_policy_grid_search",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 56.516589,
+   "summary": "This is the policy search of a single-GPU heterogeneous-offload inference runtime: the model doesn't fit, so each tensor family must be tiered across GPU / CPU DRAM / NVMe. The existing implementation materializes the entire placement-ratio simplex grid and then evaluates each point one by one, which is slow; you must make this search fast while keeping the result bit-for-bit identical. The inputs are the model/hardware parameters and the memory budget; the output is the offload policy that is cost-model-optimal within the budget constraints. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 56.5166): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wro-outlines-guide-transition-batch-loop16",
+   "infra_name": "guided_decode_fsm_advance",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 136.988316,
+   "summary": "This is the batched state advancement of regex-constrained (guided) decoding, corresponding to the advance step of the guide state machine in outlines. You may only edit guide_transition.py; you must find the slow points and drive down the wall-clock time of batch_advance. The inputs are a batch of current guide states and the just-sampled tokens; the outputs are the advanced states (and the set of allowed next tokens). Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 136.988): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wro-sbert-paraphrase-mining-loop16",
+   "infra_name": "paraphrase_mining_topk",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 45.338376,
+   "summary": "This is sentence-transformers' all-pairs paraphrase mining: finding the most similar sentence pairs among a set of sentence vectors. The current baseline computes similarities with a triple Python loop, repeatedly rescans row by row for the maximum, and then dedupes in Python; you must restore it to production speed with bit-for-bit identical output. The inputs are the embedding matrix, top_k, and max_pairs; the output is a sorted list of [score,i,j] (with i<j and no duplicates). Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 45.3384): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wro-torchao-int8-rowwise-quant-loop16",
+   "infra_name": "int8_rowwise_quant",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 902.116643,
+   "summary": "This is the row-wise int8 quantization primitive in pytorch/ao (torchao), which during low-precision/int8 mixed-precision training quantizes a high-precision 2D tensor row by row using symmetric absmax. The in-scope implementation quantizes only one row at a time and is slow; you must vectorize it to speed it up. The input is a 2D high-precision tensor, and the output is an int8 tensor plus a per-row scale. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 902.117): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wro-torchtitan-varlen-cu-seqlens-loop16",
+   "infra_name": "varlen_cu_seqlens_build",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 2.806253,
+   "summary": "This is a step in torchtitan that prepares metadata for variable-length attention: for a batch of documents packed together, it must compute the cumulative-length array (cu_seqlens). You may only edit varlen_cu_seqlens.py, and must bring down the wall-clock time of build_varlen_cu_seqlens. The input is the document-boundary information of the packed batch, and the output is the cumulative-length and other metadata required for variable-length attention. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 2.80625): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wro-tvm-winograd-conv2d-transform-loop16",
+   "infra_name": "winograd_conv2d_transform",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": 891.920536,
+   "summary": "This is the Winograd 3x3 convolution path (TVM-style) essential for CPU edge inference: it splits the activations into overlapping tiles, uses Cook-Toom constant matrices to map into the transform domain for element-wise multiplication, and then transforms back. The existing winograd_conv.py is correct but slow; you must make this set of transforms fast while keeping results bit-for-bit identical. The input is the activations and a 3x3 convolution kernel (plus the tile parameters m/r), and the output is the convolution result. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 891.921): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "kfc",
+   "task_dir": "wro-yogi-foreach-fused-loop16",
+   "infra_name": "yogi_foreach_fused_step",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": 5.291184,
+   "summary": "This is one update step of the Yogi adaptive-moment optimizer in torch-optimizer (which maintains a moving average of gradients and a sign-based second-moment estimate per parameter). The in-scope implementation updates parameter tensors one at a time in a Python loop and is slow; you must speed up this step with a foreach/fused approach while keeping the cross-step state behavior unchanged. The input is the list of parameters and gradients plus the optimizer state, and the output is the parameters and state after an in-place update. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 5.29118): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wli-fla-kkt-solvetril-build",
+   "infra_name": "wy_ut_transform_solve_tril",
+   "reward_class": "implementation",
+   "gpus": 1,
+   "max_submissions": 1,
+   "ref_speedup": null,
+   "summary": "This is the intra-chunk WY/UT transform in fla-org/flash-linear-attention (a flagship open-source LLM-infra kernel library), the intra-chunk mixing primitive for delta-rule and gated-delta linear attention. The implementation across two coupled files is for you to complete: compute the A matrix and solve T=(I+A)^{-1} (lower-triangular inverse); this task is judged only on correctness. The input is per-chunk k, beta, and the gate g, and the output is A and T, which must chain correctly into the downstream delta_rule / gated_delta_product. Metric: binary implementation-class score — 1.0 only if all hidden cases and hard gates pass; any single case failure or a triggered forbidden-edit/cheat condition is 0.0, with no partial credit."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wli-torchtitan-gptoss-expert-compute",
+   "infra_name": "gptoss_moe_expert_compute",
+   "reward_class": "implementation",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": null,
+   "summary": "This is the expert computation of the gpt-oss MoE layer in torchtitan (PyTorch's native LLM training platform), with two coupled files on the per-token forward path. You must fix the routing counts and the grouped SwiGLU expert computation: build the one-hot routing map and reduce it into per-expert token counts, then run gpt-oss's interleaved gated swiglu. The input is the token hidden states and the routing result, and the output is the hidden states after expert computation; note that gate/linear are the even/odd interleaved channels of the last dimension. Metric: binary implementation-class score — 1.0 only if all hidden cases and hard gates pass; any single case failure or a triggered forbidden-edit/cheat condition is 0.0, with no partial credit."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wro-blocksparse-gemm-sol",
+   "infra_name": "kblock_sparse_fp16_matmul",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 26.560385,
+   "summary": "This is the matrix-multiply subsystem for structured K-block-sparse weights times fp16 activations: the K rows are split into several contiguous row blocks, only some blocks are non-zero (input-feature block pruning), and the weights are stored in compressed form. The existing blocksp_matmul is correct but slow; you must make it fast, and densifying the weights is not allowed. The input is the activations a, the compressed weight blocks w_blocks, the block indices k_idx, and block_k, and the output is a@W. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 26.5604): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress signal reported to the solver is `dev_speedup` (the measured baseline_ms / candidate_ms wall-clock ratio), and the scored `speedup` fed into the curve is this same ratio measured by the held-out verifier."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wro-causal-delivery-vclock-coupled",
+   "infra_name": "causal_delivery_vclock",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 16,
+   "ref_speedup": 187.500717,
+   "summary": "This is the delivery layer of a causal-broadcast messaging system: the receiver must hand messages to the application in happens-before order, buffering out-of-order arrivals first. The two coupled files under causal/ are correct but slow when there are many out-of-order arrivals; you must speed up the buffering and delivery decision. The input is an out-of-order message stream carrying vector clocks, and the output is a delivery order that satisfies causal order. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 187.501): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress signal reported to the solver is `dev_speedup` (the measured baseline_ms / candidate_ms wall-clock ratio), and the scored `speedup` fed into the curve is this same ratio measured by the held-out verifier."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wro-fla-abc-chunkscan-sol",
+   "infra_name": "abc_gated_slot_recurrence",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 578.380265,
+   "summary": "This is chunk_abc, a two-stage gated linear-recurrence operator in flash-linear-attention with bounded slot memory. The existing implementation is correct but slow; you must speed up this chunk scan while preserving its numerical behavior. The input is per-step q/k/v and slot logits, and the output is the output stream (exposed via torch.autograd.Function). Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 578.38): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress signal reported to the solver is `dev_speedup` (the measured baseline_ms / candidate_ms wall-clock ratio), and the scored `speedup` fed into the curve is this same ratio measured by the held-out verifier."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wro-fla-gated-delta-chunkscan-sol",
+   "infra_name": "gated_deltanet_chunk_scan",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 822.619615,
+   "summary": "This is the chunk forward of Gated DeltaNet (gated delta-rule linear attention) in flash-linear-attention, spanning three coupled files. The existing implementation is correct but slow; you must make it fast: at each step the state first decays by a scalar log-domain forget gate, then undergoes a beta-weighted delta update. The input is q/k/v, the gate g, and beta, and the output is the output of chunk_gated_delta_rule (including the final state when needed). Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 822.62): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress signal reported to the solver is `dev_speedup` (the measured baseline_ms / candidate_ms wall-clock ratio), and the scored `speedup` fed into the curve is this same ratio measured by the held-out verifier."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wro-fla-nsa-sparse-sol",
+   "infra_name": "native_sparse_attn_select",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 1036.420558,
+   "summary": "This is parallel_nsa, the selection path of Native Sparse Attention (NSA) in flash-linear-attention. The existing implementation is correct but slow; you must make it fast: under a causal mask, each query attends only to the keys within its own selected KV blocks. The input is q/k/v and the per-query selected block indices (grouped-query attention, G=HQ//H), and the output is the sparse-attention output. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 1036.42): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress signal reported to the solver is `dev_speedup` (the measured baseline_ms / candidate_ms wall-clock ratio), and the scored `speedup` fed into the curve is this same ratio measured by the held-out verifier."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wro-fla-ttt-chunkscan-sol",
+   "infra_name": "ttt_linear_chunk_scan",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 63.173556,
+   "summary": "This is chunk_ttt_linear, the test-time-training (TTT) linear layer in flash-linear-attention. The existing implementation is correct but slow; you must make it fast: the sequence is processed in mini-batches, and each batch performs one inner-loop gradient update to the fast-weight state under a layer-norm reconstruction objective, then reads out. The input is per-mini-batch q/k/v and parameters such as the learning rate, and the output is the result after the updated state and the output layer norm. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 63.1736): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress signal reported to the solver is `dev_speedup` (the measured baseline_ms / candidate_ms wall-clock ratio), and the scored `speedup` fed into the curve is this same ratio measured by the held-out verifier."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wro-fla-wallattn-flash-sol",
+   "infra_name": "windowed_decay_attention",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 308.863663,
+   "summary": "This is parallel_wall_attn, the sliding-window decayed attention in flash-linear-attention, with per-channel multiplicative decay. The existing implementation is correct but slow; you must make it fast (the logit contains a difference of the log-domain prefix P=cumsum(g)/ln2). The input is q/k/v and the per-channel log decay g, and the output is the causal sliding-window attention result. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 308.864): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress signal reported to the solver is `dev_speedup` (the measured baseline_ms / candidate_ms wall-clock ratio), and the scored `speedup` fed into the curve is this same ratio measured by the held-out verifier."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wro-flashattn-cute-blocksparse-bwd",
+   "infra_name": "blocksparse_attn_backward",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 49.008492,
+   "summary": "This is the differentiable block-sparse multi-head attention in the flash-attention CuTe version: given the allowed (query-block, key-block) pairs, a query may only attend to keys within the allowed blocks. The existing implementation is correct but slow; you must make both the forward and the backward(dout) pass fast, and the signature may not be changed. The input is q/k/v and the block-sparse mask description, and the output is the attention result plus the backward dq/dk/dv. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 49.0085): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress signal reported to the solver is `dev_speedup` (the measured baseline_ms / candidate_ms wall-clock ratio), and the scored `speedup` fed into the curve is this same ratio measured by the held-out verifier."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wro-flashattn-cute-blocksparse",
+   "infra_name": "blocksparse_attn_forward",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 189.21,
+   "summary": "This is the forward of block-sparse multi-head attention in the flash-attention CuTe version: a query may only attend to keys within the allowed (query-block, key-block) pairs. The existing implementation is correct but slow; you must make the forward fast, and neither the signature nor the block-sparse mask semantics may be changed. The input is q/k/v and the description of the allowed blocks, and the output is the block-sparse attention output. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 189.21): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress signal reported to the solver is `dev_speedup` (the measured baseline_ms / candidate_ms wall-clock ratio), and the scored `speedup` fed into the curve is this same ratio measured by the held-out verifier."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wro-flashattn-cute-scoremod-tanh",
+   "infra_name": "attn_score_mod_tanh",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 31.37,
+   "summary": "This is the attention forward with a user-defined score modification in the flash-attention CuTe version: before softmax, a callable transform is applied to each scaled score. The existing implementation is correct but slow; you must make this gated-tanh-form score-mod path fast (it may include a causal mask and grouped-query attention). The input is q/k/v and the score transform, and the output is the attention output. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 31.37): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress signal reported to the solver is `dev_speedup` (the measured baseline_ms / candidate_ms wall-clock ratio), and the scored `speedup` fed into the curve is this same ratio measured by the held-out verifier."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wro-llamacpp-simd-q5k",
+   "infra_name": "q5k_q8k_simd_dot",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 16,
+   "ref_speedup": 11.53,
+   "summary": "This is the CPU hot-path kernel ggml_vec_dot_q5_K_q8_K in the ggml tensor library used by llama.cpp: the dot product of a 5-bit K-quantized weight row with its paired activation row. The x86 implementation is slow; you must speed up this dot product with SIMD while reproducing results bit-for-bit. The input is paired Q5_K and Q8_K blocks, and the output is their dot product; specializing to the test inputs is not allowed. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 11.53): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress signal reported to the solver is `dev_speedup` (the measured baseline_ms / candidate_ms wall-clock ratio), and the scored `speedup` fed into the curve is this same ratio measured by the held-out verifier."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wro-lora-punica-fused",
+   "infra_name": "punica_multilora_shrink_expand",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 16.59,
+   "summary": "This is vLLM's Punica-style batched multi-LoRA application subsystem (a two-stage shrink → expand path), spanning three Triton kernel files. The existing implementation is correct but slow; you must make it fast within a 2% relative tolerance (fp16 inputs, fp32 accumulation). The inputs are the batched activations together with the A/B weights of the several LoRAs and their grouping information; the output is the result with each LoRA's own contribution added on. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 16.59): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress signal reported to the solver is `dev_speedup` (the measured baseline_ms / candidate_ms wall-clock ratio), and the scored `speedup` fed into the curve is this same ratio measured by the held-out verifier."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wro-memory-accounting-sim-coupled",
+   "infra_name": "memory_plan_peak_accounting",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 16,
+   "ref_speedup": 1344.398352,
+   "summary": "This is a memory planner and OOM predictor for training/inference execution plans: each tensor is allocated at some step and freed at another, occupying nbytes while it is live. The two coupled files under memsim/ are correct but slow on large plans and under repeated peak queries; you must make the step-by-step usage, peak statistics, and eviction-schedule search fast. The inputs are each tensor's [alloc, free) lifetime, its byte size, and a budget; the outputs are the step-by-step memory footprint, the peak, and an eviction plan that fits within the budget. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 1344.4): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress signal reported to the solver is `dev_speedup` (the measured baseline_ms / candidate_ms wall-clock ratio), and the scored `speedup` fed into the curve is this same ratio measured by the held-out verifier."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wro-secure-agg-shamir-committee-coupled",
+   "infra_name": "shamir_secure_aggregation",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 16,
+   "ref_speedup": 57.658178,
+   "summary": "This is the server side of a privacy-preserving (secure aggregation) system: clients mask their model updates and split them across a committee using Shamir secret sharing, and the server reconstructs the aggregated value from these shares. The two coupled files under secureagg/ are correct but slow when reconstructing many coordinates over the same committee (every model coordinate must be reconstructed once per round); you must make it fast. The input is the per-coordinate lists of shares (over multiple rounds); the output is the reconstructed aggregated value. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 57.6582): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress signal reported to the solver is `dev_speedup` (the measured baseline_ms / candidate_ms wall-clock ratio), and the scored `speedup` fed into the curve is this same ratio measured by the held-out verifier."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wro-sp24mm-matmul-sol",
+   "infra_name": "sparse_2_4_fp16_matmul",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 10.28458,
+   "summary": "This is a matmul subsystem multiplying 2:4 semi-structured sparse weights by fp16 activations: within every 4 consecutive K rows exactly 2 are nonzero, and the weights are stored in a compressed format (values + 2-bit position metadata). The existing sp24mm_matmul is correct but slow; you must make it fast, and you may not densify the weights. The inputs are the activation a, the compressed weight values w_vals, and the metadata w_meta; the output is a@W. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 10.2846): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress signal reported to the solver is `dev_speedup` (the measured baseline_ms / candidate_ms wall-clock ratio), and the scored `speedup` fed into the curve is this same ratio measured by the held-out verifier."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wro-ssm-ssd-chunkscan",
+   "infra_name": "mamba2_ssd_chunk_scan",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 467.4,
+   "summary": "This is vLLM's Mamba-2 SSD (state-space dual) sequence-scan subsystem, where five coupled files make up the full chunk-scan pipeline. The existing implementation is correct but slow; you must make it fast within a given tolerance, and your changes may only land within the declared scope. The inputs are the sequence's state-space parameters and input stream; the output is the scanned output (including the cross-chunk state passing). Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 467.4): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress signal reported to the solver is `dev_speedup` (the measured baseline_ms / candidate_ms wall-clock ratio), and the scored `speedup` fed into the curve is this same ratio measured by the held-out verifier."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wro-vllm-v1-priority-request-queue",
+   "infra_name": "vllm_priority_request_queue",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 16,
+   "ref_speedup": 312.0,
+   "summary": "This is the priority request queue of the vLLM V1 scheduler, which dequeues in ascending order of (priority, arrival_time, insertion order). It currently uses an unordered list: enqueue is O(1), but every peek/pop linearly scans for the minimum (draining n items is O(n^2)); you must make it fast while keeping the dequeue order exactly identical. The input is a stream of add/pop/remove operations; the output is the exact dequeue-order trace. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 312): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress signal reported to the solver is `dev_speedup` (the measured baseline_ms / candidate_ms wall-clock ratio), and the scored `speedup` fed into the curve is this same ratio measured by the held-out verifier."
+  },
+  {
+   "bench": "lh",
+   "task_dir": "wro-w8a16-groupdequant-matmul-sol",
+   "infra_name": "w8a16_group_dequant_matmul",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 6.42047,
+   "summary": "This is a matmul subsystem multiplying group-quantized int8 weights by fp16 activations: along the K dimension, every group_size rows share one (scale, zero-point) pair. The existing w8a16_matmul is correct but slow; you must make the dequantization and the matmul fast (ideally fusing away the intermediate dense weights). The inputs are the activation a, the int8 qweight, the scales/zeros, and group_size; the output is a@dequant(W). Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 6.42047): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress signal reported to the solver is `dev_speedup` (the measured baseline_ms / candidate_ms wall-clock ratio), and the scored `speedup` fed into the curve is this same ratio measured by the held-out verifier."
+  },
+  {
+   "bench": "e2e",
+   "task_dir": "a3-moe-train-budget",
+   "infra_name": "moe_train_wallclock_budget",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 1.533747535323529,
+   "summary": "You are given the complete karpathy/nanoGPT training system (/app/repo, freely modifiable) and a pre-tokenized WikiText-103 corpus, on a single H20. Within the fixed wall-clock budget set by the framework, train the best MoE language model you can, while satisfying a hard lower bound on total parameter count (parameters are re-counted at scoring time). The input is the modifiable training system and the corpus; the output is the trained checkpoint, and scoring looks only at val_bpb on the held-out set (lower is better). Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 1.53375): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress metric is `val_bpb` (held-out bits-per-byte, lower is better); the scored `speedup` is baseline_bpb / candidate `val_bpb` at the fixed wall-clock budget."
+  },
+  {
+   "bench": "e2e",
+   "task_dir": "a4-token-efficiency-budget",
+   "infra_name": "lm_train_token_budget",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 1.204527530540146,
+   "summary": "Again the complete nanoGPT training system plus the WikiText-103 corpus on a single H20, but the budget is now switched to a fixed number of training tokens. Train the best language model you can without exceeding the given token budget — because the budget is tokens rather than time, merely raising throughput does nothing; you must improve sample efficiency. The input is the modifiable training system and the corpus; the output is a checkpoint, and scoring measures its val_bpb on an unseen held-out set. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 1.20453): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress metric is `dev_val_bpb` (held-out bits-per-byte, lower is better); the scored `speedup` is baseline_bpb / candidate `dev_val_bpb` at the fixed token budget."
+  },
+  {
+   "bench": "e2e",
+   "task_dir": "a8-peft-adapter-byte-golf",
+   "infra_name": "peft_adapter_byte_budget",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 1.2326578617539896,
+   "summary": "You are given the complete huggingface/peft source, a frozen Qwen2.5-0.5B-Instruct base model, a single H20, and a corpus of real distributed-training system code. Adapt this frozen base as well as you can to the corpus's domain, but the adaptation artifacts you may deliver (adapter weights + loading code) are hard-capped at 320 KiB total bytes. The inputs are the base model and the corpus; the outputs are the adapter artifacts under /app/submission and a build_adapted_model loading function, and scoring looks at the relative gain in held-out cross-entropy. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 1.23266): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress metric is `val_gain_nats` (the held-out cross-entropy improvement, in nats, over the frozen base); the scored `speedup` is the relative-gain ratio built from it."
+  },
+  {
+   "bench": "e2e",
+   "task_dir": "checkpoint-transfer-integrity",
+   "infra_name": "checkpoint_transfer_integrity",
+   "reward_class": "implementation",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": null,
+   "summary": "This is a checkpoint tiered-transfer integrity-and-recovery task, semantically aligned with real systems such as NeMo's S3CheckpointIO. You must implement the CheckpointTransfer class: slice the checkpoint binary into chunks, compute a crc32 per chunk and generate a manifest, perform an all-or-nothing durable upload, verify each chunk on download with resumable-transfer support, and reconstruct a single lost chunk using an XOR parity chunk. The inputs are the checkpoint byte blocks and an externally injected chunk store; the outputs are the results of upload/download/reconstruction and the normalized artifact paths. Metric: binary implementation-class score — 1.0 only if all hidden cases and hard gates pass; any single case failure or a triggered forbidden-edit/cheat condition is 0.0, with no partial credit."
+  },
+  {
+   "bench": "e2e",
+   "task_dir": "embed-compress-golf",
+   "infra_name": "embedding_compress_retrieval",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 16,
+   "ref_speedup": 1.4290238072817099,
+   "summary": "You are given a complete UKPLab/sentence-transformers checkout and a frozen 384-dimensional all-MiniLM-L6-v2, in an environment with 8 CPU cores, no GPU, and no internet. Under a hard budget of at most 64 bytes per vector (384-dim fp32, or even int8, won't fit, so heavy compression is required), make the nDCG@10 on the held-out retrieval set as high as possible, optionally adding a second-stage rerank over a candidate short-list. The inputs are the texts and queries; the outputs are the encoder (and optional reranker) under /app/submission, and scoring is eval-only, loading only your artifacts for evaluation. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 1.42902): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress metric is `ndcg_at_10` (nDCG@10 on the held-out retrieval set at the fixed per-vector byte budget); the scored `speedup` is candidate `ndcg_at_10` / baseline nDCG@10."
+  },
+  {
+   "bench": "e2e",
+   "task_dir": "eval-scoring-throughput",
+   "infra_name": "eval_harness_scoring_throughput",
+   "reward_class": "performance",
+   "gpus": 0,
+   "max_submissions": 16,
+   "ref_speedup": 2.24419,
+   "summary": "You are given a complete EleutherAI/lm-evaluation-harness checkout (editable-installable), in an environment with 8 CPU cores and no GPU — what is under evaluation is the pure-CPU scoring/aggregation pipeline that runs after model inference. You must optimize this end-to-end throughput: regex answer extraction, the take_first / majority_vote transforms, argmax over multiple-choice loglikelihoods, and metric computations such as exact_match / contains / prefix_match. The input is a batch of evaluation records that already carry the model outputs; the output is a {id, score} per sample (the results must match the reference). Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 2.24419): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress metric is `dev_public_score` (a public proxy of the pure-CPU scoring-pipeline throughput); the scored `speedup` is baseline_time / your_time, measured ABBA-paired."
+  },
+  {
+   "bench": "e2e",
+   "task_dir": "kv-traffic-sol",
+   "infra_name": "paged_kv_cache_traffic",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 2.5799320719769216,
+   "summary": "You are given a complete vLLM 0.10.1.1 source tree (importable, with torch/triton present) on a single H20 — the task is the movement bandwidth of the paged KV cache. A large fraction of an inference engine's memory bandwidth is spent moving the KV cache, and you must bring these movements as close as possible to the hardware's peak bandwidth. The inputs are the page pool and the per-request block table; the output is the moved KV cache, and scoring also reports what percentage of measured HBM peak each case reaches. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 2.57993): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress metric is `dev_public_score` (a public proxy formed from the geomean SOL-fraction / achieved-HBM-bandwidth over the timed cases); the scored `speedup` is the ABBA-paired ratio of that metric against the strong baseline."
+  },
+  {
+   "bench": "e2e",
+   "task_dir": "tiered-storage-io",
+   "infra_name": "tiered_storage_engine",
+   "reward_class": "implementation",
+   "gpus": 0,
+   "max_submissions": 1,
+   "ref_speedup": null,
+   "summary": "This is a tiered-storage engine and cross-tier consistency task, semantically aligned with real systems such as seaweedfs volume-tier, RocketMQ TieredMessageStore, and Kafka RemoteLogManager. You must implement TieredStore: a capacity-limited in-memory hot tier layered over a durable cold tier, supporting size-driven LRU eviction, resumable segmented migration, and integrity verification. The input is read/write/migration operations in arbitrary order and interleaving; the output must, under any access sequence, be consistent with the reference model's cross-tier read semantics. Metric: binary implementation-class score — 1.0 only if all hidden cases and hard gates pass; any single case failure or a triggered forbidden-edit/cheat condition is 0.0, with no partial credit."
+  },
+  {
+   "bench": "e2e",
+   "task_dir": "varlen-prefill-attn-sol",
+   "infra_name": "varlen_causal_prefill_attn",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 1.5317,
+   "summary": "You are given a complete vLLM 0.10.1.1 source tree on a single H20 — the task is variable-length causal prefill attention in a continuous-batching engine. A batch of prompts is packed into one flat tensor, with a cumulative-length array describing the boundaries; you must bring this one prefill as close as possible to the hardware limit. The inputs are the packed q/k/v and cu_seqlens; the output is the causal-attention result, and scoring reports each case's per-call latency and the TFLOP/s achieved. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 1.5317): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress metric is `dev_public_score` (a public proxy from each case's per-call latency / achieved TFLOP/s); the scored `speedup` is the ABBA-paired ratio against the strong baseline."
+  },
+  {
+   "bench": "e2e",
+   "task_dir": "vllm-scheduler-mixed-batch-serving",
+   "infra_name": "vllm_continuous_batch_serving",
+   "reward_class": "performance",
+   "gpus": 1,
+   "max_submissions": 16,
+   "ref_speedup": 1.2857108264648467,
+   "summary": "You are given a vLLM OpenAI-compatible serving instance running on a single H20, up against a strong baseline that has already been hardened on the scheduling side (CUDA graph enabled, chunked-prefill token budget tuned, etc.). Without changing the greedy outputs at all, you must make this service serve the hidden mixed request shapes faster (through request scheduling and continuous batching). The input is the service launched by /app/submission/launch_server.sh; the output is the service's responses, and scoring is the median of baseline_time/your_time over the hidden workload. Metric: continuous performance-class score — first pass a hard correctness gate, then score on a logarithmic curve relative to the oracle anchor (ref_speedup = 1.28571): tying the anchor scores 0, you must exceed it to score anything, and reaching the anchor squared caps at 1.0. The per-round dev progress metric is `dev_tokens_per_s` (serving throughput in tokens/s); the scored `speedup` is the median of baseline_time / your_time over the hidden workloads."
+  }
+ ]
+}

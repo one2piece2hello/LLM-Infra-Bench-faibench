@@ -1,0 +1,45 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wro-outlines-guide-transition-batch-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "guide_transition.py implements the batched guide-state advance step of regex-constrained (guided) decoding."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wro-outlines-guide-transition-batch-loop16:v1@sha256:054b563d5cae3efac9862cfff5b2bf71b0aad2fed6155bb5e1560f6033766192
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wro-outlines-guide-transition-batch-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wro-outlines-guide-transition-batch-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+primary_edit_paths = ["guide_transition.py"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "reward"
+goal = "maximize"
+ref_speedup = 136.988316
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+[loop]
+# NOTE: the /opt/loop harness baked into the image applies its own 3/16 in-session budget; for in-session loop scoring the image is authoritative.
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"

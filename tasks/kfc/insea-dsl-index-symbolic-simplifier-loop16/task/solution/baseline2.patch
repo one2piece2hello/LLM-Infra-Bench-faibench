@@ -1,0 +1,241 @@
+diff --git a/index_expr_simplify.py b/index_expr_simplify.py
+index 0f06489..f496a1b 100644
+--- a/index_expr_simplify.py
++++ b/index_expr_simplify.py
+@@ -1,51 +1,11 @@
+-"""Canonical simplification of bounded integer index expressions.
+-
+-An *index expression* is a small tree over integer constants and non-negative
+-bounded integer variables built from the operators ``+``, ``*``, ``//`` (floor
+-division), ``%`` (modulo), ``min`` and ``max``. Trees are plain nested tuples:
+-
+-    ("const", n)                      an integer literal
+-    ("var", name)                     a variable (``name`` is a str)
+-    ("add",      left, right)         left + right
+-    ("mul",      left, right)         left * right
+-    ("floordiv", left, right)         left // right
+-    ("mod",      left, right)         left %  right
+-    ("min",      left, right)         min(left, right)
+-    ("max",      left, right)         max(left, right)
+-
+-Public entry point
+-------------------
+-``simplify_expr(expr, bounds)`` -> a new expression tree.
+-
+-``bounds`` maps every variable name that occurs in ``expr`` to an inclusive
+-integer range ``(lo, hi)`` with ``0 <= lo <= hi``. The returned tree must
+-
+-  * evaluate to the SAME integer as ``expr`` for every assignment of the
+-    variables within their declared ranges (Python ``//`` / ``%`` semantics), and
+-  * contain no more nodes than ``expr`` (a simplification never grows the tree).
+-
+-Error contract
+---------------
+-``ValueError`` if a variable occurring in ``expr`` has no entry in ``bounds``
+-(an unbounded variable cannot be reasoned about), and ``ValueError`` if a
+-``floordiv`` or ``mod`` has a divisor that is the constant ``0``.
+-
+-Why the current implementation leaves large expressions
+-------------------------------------------------------
+-The routine below makes a single bottom-up pass that only folds all-constant
+-subtrees and the most obvious per-node identities (adding ``0``, multiplying by
+-``1``, multiplying by ``0``). It never re-examines a node after rewriting a child
+-and never combines terms that are separated across ``+``, so expressions whose
+-size collapses only after relating a remainder to its matching quotient stay
+-large. Produce a tree with FEWER nodes for the same values, while keeping the
+-contract above exact.
+-
+-Note on allowed operations
+---------------------------
+-Build the rewrite yourself over the tuple grammar above. Do not delegate the
+-simplification to a computer-algebra system or any external symbolic-math package
+-(the scoring harness scans the submitted file for those imports and scores the
+-task 0). Standard library only.
++"""BASELINE2 / soundness probe (reviewer-only; NOT the oracle) — a structurally
++DIFFERENT but still correct simplifier. Where the oracle iterates a rewrite pass
++to a fixpoint, this one is a single bottom-up canonical normalizer: it normalizes
++children first, then at each ``+`` node flattens the whole additive subtree into a
++term list, folds remainder+quotient pairs and constants directly on that list, and
++rebuilds — no outer re-run. It must earn its OWN positive reward in a scoring run, proving the
++verifier rewards value-equivalence + node reduction, not a match against the
++oracle's code.
+ """
+ 
+ 
+@@ -82,61 +42,135 @@ def _check_free_vars(expr, bounds):
+         raise ValueError(f"unbounded variable(s): {sorted(missing)}")
+ 
+ 
+-def _as_const(node):
+-    """Return the integer value if node is a constant literal, else None."""
+-    if node[0] == "const":
+-        return node[1]
++def _const(node):
++    return node[1] if node[0] == "const" else None
++
++
++def _additive_terms(node, terms):
++    if node[0] == "add":
++        _additive_terms(node[1], terms)
++        _additive_terms(node[2], terms)
++    else:
++        terms.append(node)
++
++
++def _as_mod(term):
++    """(base, c, mul) for a term equal to (base % c) or (base % c)*const."""
++    if term[0] == "mod" and _const(term[2]) is not None and _const(term[2]) > 0:
++        return (term[1], _const(term[2]), 1)
++    if term[0] == "mul":
++        for x, y in ((term[1], term[2]), (term[2], term[1])):
++            m = _const(y)
++            if m is not None and x[0] == "mod" and _const(x[2]) is not None and _const(x[2]) > 0:
++                return (x[1], _const(x[2]), m)
+     return None
+ 
+ 
+-def _fold(expr):
++def _as_div(term):
++    """(base, c, k) for a term equal to (base // c)*const."""
++    if term[0] == "mul":
++        for x, y in ((term[1], term[2]), (term[2], term[1])):
++            k = _const(y)
++            if k is not None and x[0] == "floordiv" and _const(x[2]) is not None and _const(x[2]) > 0:
++                return (x[1], _const(x[2]), k)
++    return None
++
++
++def _canon_add(terms):
++    # fold (base%c)*m + (base//c)*(c*m) -> base*m, repeatedly, then merge constants
++    work = list(terms)
++    i = 0
++    while i < len(work):
++        mf = _as_mod(work[i])
++        if mf is not None:
++            base, c, m = mf
++            hit = None
++            for j in range(len(work)):
++                if j == i:
++                    continue
++                df = _as_div(work[j])
++                if df is not None and df[0] == base and df[1] == c and df[2] == c * m:
++                    hit = j
++                    break
++            if hit is not None:
++                combined = base if m == 1 else ("mul", base, ("const", m))
++                new = [t for idx, t in enumerate(work) if idx not in (i, hit)]
++                work = [combined] + new
++                i = 0
++                continue
++        i += 1
++    const_sum = 0
++    rest = []
++    for t in work:
++        cv = _const(t)
++        if cv is not None:
++            const_sum += cv
++        else:
++            rest.append(t)
++    if const_sum != 0:
++        rest.append(("const", const_sum))
++    if not rest:
++        return ("const", 0)
++    acc = rest[0]
++    for t in rest[1:]:
++        acc = ("add", acc, t)
++    return acc
++
++
++def _norm(expr):
+     op = expr[0]
+     if op in ("const", "var"):
+         return expr
++    a = _norm(expr[1])
++    b = _norm(expr[2])
++    ca, cb = _const(a), _const(b)
+ 
+-    left = _fold(expr[1])
+-    right = _fold(expr[2])
+-    lc = _as_const(left)
+-    rc = _as_const(right)
+-
+-    # all-constant subtree -> evaluate to a literal
+-    if lc is not None and rc is not None:
++    if ca is not None and cb is not None:
+         if op == "add":
+-            return ("const", lc + rc)
++            return ("const", ca + cb)
+         if op == "mul":
+-            return ("const", lc * rc)
++            return ("const", ca * cb)
+         if op == "floordiv":
+-            if rc == 0:
++            if cb == 0:
+                 raise ValueError("division by constant zero")
+-            return ("const", lc // rc)
++            return ("const", ca // cb)
+         if op == "mod":
+-            if rc == 0:
++            if cb == 0:
+                 raise ValueError("modulo by constant zero")
+-            return ("const", lc % rc)
++            return ("const", ca % cb)
+         if op == "min":
+-            return ("const", lc if lc <= rc else rc)
++            return ("const", ca if ca <= cb else cb)
+         if op == "max":
+-            return ("const", lc if lc >= rc else rc)
++            return ("const", ca if ca >= cb else cb)
+ 
+-    # a constant-zero divisor is rejected even if only one side is constant
+-    if op in ("floordiv", "mod") and rc == 0:
++    if op in ("floordiv", "mod") and cb == 0:
+         raise ValueError("division/modulo by constant zero")
+ 
+-    # obvious single-node identities
+     if op == "add":
+-        if lc == 0:
+-            return right
+-        if rc == 0:
+-            return left
+-    elif op == "mul":
+-        if lc == 1:
+-            return right
+-        if rc == 1:
+-            return left
+-        if lc == 0 or rc == 0:
++        terms = []
++        _additive_terms(("add", a, b), terms)
++        return _canon_add(terms)
++    if op == "mul":
++        if ca == 1:
++            return b
++        if cb == 1:
++            return a
++        if ca == 0 or cb == 0:
+             return ("const", 0)
+-
+-    return (op, left, right)
++        return ("mul", a, b)
++    if op == "floordiv":
++        if cb == 1:
++            return a
++        return ("floordiv", a, b)
++    if op == "mod":
++        if a[0] == "mod" and a[2] == b:
++            return a
++        return ("mod", a, b)
++    if op in ("min", "max"):
++        if a == b:
++            return a
++        return (op, a, b)
++    return (op, a, b)
+ 
+ 
+ def simplify_expr(expr, bounds):
+@@ -145,4 +179,4 @@ def simplify_expr(expr, bounds):
+         bounds = {}
+     _check_bounds(bounds)
+     _check_free_vars(expr, bounds)
+-    return _fold(expr)
++    return _norm(expr)

@@ -1,0 +1,53 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wli-fla-retention-chunkscan-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "Task: speed up multi-scale retention (RetNet) chunked linear attention in `fla-org/flash-linear-attention`"
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wli-fla-retention-chunkscan-loop16:v1@sha256:0434b895a030aa408e19671727cee61527f8960dd41926058675d46855ce32ca
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wli-fla-retention-chunkscan-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wli-fla-retention-chunkscan-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 1
+# H20 只是**锚点标定用卡**,不是硬性限制。换卡时:①按 tests/ref_speedup.caveat.md 重标锚点;
+#   ②用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像。
+gpu_types = ["H20"]
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "acceleration"
+contract_pattern = "kernelbench_generic_v1"
+primary_edit_paths = ["fla/ops/retention/chunk.py"]
+forbidden_edit_paths = ["*"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+ref_speedup = 510.24
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "NVIDIA H20"
+
+[loop]
+# single-submission — the solver gets exactly ONE
+# `bash /opt/loop/submit.sh`; that first submit IS the final graded submission.
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+declared_submission_policy = "single_submission"

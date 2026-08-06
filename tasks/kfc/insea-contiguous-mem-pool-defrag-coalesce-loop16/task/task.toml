@@ -1,0 +1,80 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "insea-contiguous-mem-pool-defrag-coalesce-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "You are working on the memory pool that a training runtime uses to hand out many variable-size buffers from a single …"
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 21600
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/insea-contiguous-mem-pool-defrag-coalesce-loop16:loop-20260720T102243Z@sha256:4965e927214c176deb08ce2d3b4e7ebc21adb328b6065077e03371768abb7874
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-insea-contiguous-mem-pool-defrag-coalesce-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-insea-contiguous-mem-pool-defrag-coalesce-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 16000
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timeout_sec = 3600
+task_kind = "acceleration"
+contract_pattern = "A"
+timing_metric = "callgrind_ir"
+candidate_source_root = "/app/repo"
+primary_edit_paths = ["/app/repo/mem_pool.py"]
+forbidden_edit_paths = ["/app/repo/tests/**", "/opt/verifier-*", "/tests/**", "/opt/loop/**"]
+result_paths = [
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+]
+
+[primary_metric]
+name = "mem_pool_defrag_ir_speedup"
+goal = "maximize"
+metric_kind = "instruction_count"
+reward_formula = "acceleration: reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0; the underlying measurement is measured speedup = baseline_Ir / candidate_Ir (valgrind/callgrind retired-instruction count for build+alloc/free op-stream over a fragmented arena); deterministic and hardware-portable (pure-Python stdlib). The 14-case hidden correctness suite (first-fit placement, coalescing, compaction, no-overlap invariant, relocation-count work evidence), anti-cheat (only mem_pool.py may change) and the real-allocator/array-library ban are hard gates."
+ref_speedup = 3.01623
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+correctness_gates = [
+    "hidden_case_suite",
+    "normal_alloc_free_mix",
+    "normal_first_fit_lowest_address",
+    "boundary_full_arena",
+    "boundary_alloc_zero",
+    "degenerate_free_all_one_run",
+    "degenerate_full_then_reuse",
+    "error_free_bad_id",
+    "error_alloc_too_big_and_bad_args",
+    "compaction_required",
+    "metamorphic_free_order_independence",
+    "metamorphic_alloc_release_roundtrip",
+    "invariant_no_overlap_bookkeeping",
+    "hidden_long_op_stream",
+    "work_evidence_relocation_count",
+    "candidate_reference_agreement",
+    "anti_cheat_forbidden_edit",
+    "forbidden_allocator_or_array_primitive",
+]
+
+[loop]
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+mode = "baked"
+feedback_surface = "/opt/loop/submit.sh"

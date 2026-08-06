@@ -1,0 +1,4 @@
+{
+  "oracle_ms": 4.123337,
+  "note": "calibrated on the authoring CPU lane (Intel Sapphire Rapids, no GPU); mean of the oracle-mode (4.009997) and baseline2-mode (4.236676) anchors. Re-measure on other hardware — see tests/ref_speedup.caveat.md."
+}

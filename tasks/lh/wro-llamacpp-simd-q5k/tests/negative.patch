@@ -1,0 +1,10 @@
+--- a/ggml/src/ggml-cpu/arch/x86/quants.c
++++ b/ggml/src/ggml-cpu/arch/x86/quants.c
+@@ -2103,6 +2103,7 @@
+     UNUSED(kmask3);
+     UNUSED(utmp);
+     ggml_vec_dot_q5_K_q8_K_generic(n, s, bs, vx, bx, vy, by, nrc);
++    *s *= 0.5f;   // NEGATIVE: drops a scale factor (plausible quant-scaling bug)
+ }
+ 
+ void ggml_vec_dot_q6_K_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, size_t bx, const void * GGML_RESTRICT vy, size_t by, int nrc) {

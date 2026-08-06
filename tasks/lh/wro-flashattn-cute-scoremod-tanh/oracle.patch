@@ -1,0 +1,89 @@
+diff --git a/flash_attn/cute/interface.py b/flash_attn/cute/interface.py
+index dd60318..4bea468 100644
+--- a/flash_attn/cute/interface.py
++++ b/flash_attn/cute/interface.py
+@@ -2196,53 +2196,6 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
+         return dq, dk, dv, *((None,) * 31)
+ 
+ 
+-def _wro_eager_scoremod_attn(q, k, v, softmax_scale, causal, return_lse):
+-    """Correct but slow multi-head attention forward with a USER-PROVIDED score modification.
+-
+-    Computes attention by materializing the (batch, heads, seqlen_q, seqlen_k) score matrix,
+-    applying the fixed user score-mod transform on the (softmax_scale-multiplied) scores BEFORE
+-    the optional causal mask and the softmax, then combining with values. Grouped-query attention
+-    (num_heads_kv < num_heads_q) is supported by sharing each key/value head across consecutive
+-    query heads. Returns (batch, seqlen_q, num_heads_q, head_dim), plus the natural-log log-sum-exp
+-    when return_lse is set.
+-
+-    The score-mod transform used here is the same one implemented by ``wro_scoremod_callable`` at
+-    module scope: elementwise gated-tanh: scores * (beta + (1-beta) * tanh(alpha*scores)). It is fixed for this subsystem so the correctness reference and the fused
+-    fast path agree exactly.
+-    """
+-    b, sq, hq, d = q.shape
+-    sk = k.shape[1]
+-    hk = k.shape[2]
+-    if softmax_scale is None:
+-        softmax_scale = 1.0 / math.sqrt(d)
+-    kk, vv = k, v
+-    if hk != hq:
+-        assert hq % hk == 0, "num query heads must be a multiple of num kv heads"
+-        rep = hq // hk
+-        kk = k.repeat_interleave(rep, dim=2)
+-        vv = v.repeat_interleave(rep, dim=2)
+-    qf = q.transpose(1, 2).float()
+-    kf = kk.transpose(1, 2).float()
+-    vf = vv.transpose(1, 2).float()
+-    scores = torch.matmul(qf, kf.transpose(-1, -2)) * softmax_scale
+-    # Scalar-elementwise gated-tanh score modification: scores * (beta + (1 - beta) *
+-    # tanh(alpha * scores)). Nonlinear but non-position-dependent user score_mod.
+-    ALPHA = 0.3; BETA = 0.5
+-    scores = scores * (BETA + (1.0 - BETA) * torch.tanh(ALPHA * scores))
+-    if causal:
+-        cm = torch.triu(
+-            torch.ones(sq, sk, device=scores.device, dtype=torch.bool),
+-            diagonal=sk - sq + 1,
+-        )
+-        scores = scores.masked_fill(cm, float("-inf"))
+-    lse = torch.logsumexp(scores, dim=-1)
+-    probs = torch.softmax(scores, dim=-1)
+-    out = torch.matmul(probs, vf).transpose(1, 2).to(q.dtype)
+-    if return_lse:
+-        return out, lse
+-    return out
+-
+-
+ def flash_attn_func(
+     q: torch.Tensor,
+     k: torch.Tensor,
+@@ -2266,7 +2219,29 @@ def flash_attn_func(
+     block_sparse_tensors_bwd: Optional[BlockSparseTensorsTorch] = None,
+     return_lse: bool = False,
+ ):
+-    return _wro_eager_scoremod_attn(q, k, v, softmax_scale, causal, return_lse)
++    return FlashAttnFunc.apply(
++        q,
++        k,
++        v,
++        qv,
++        gather_kv_indices,
++        softmax_scale,
++        causal,
++        window_size,
++        learnable_sink,
++        softcap,
++        num_splits,
++        pack_gqa,
++        deterministic,
++        score_mod,
++        score_mod_bwd,
++        mask_mod,
++        aux_tensors,
++        aux_scalars,
++        block_sparse_tensors,
++        block_sparse_tensors_bwd,
++        return_lse,
++    )
+ 
+ 
+ def flash_attn_varlen_func(

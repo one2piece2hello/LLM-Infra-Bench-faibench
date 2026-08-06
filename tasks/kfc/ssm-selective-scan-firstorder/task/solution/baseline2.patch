@@ -1,0 +1,140 @@
+diff --git a/state_space_scan.py b/state_space_scan.py
+index caaa034..f92f0bd 100644
+--- a/state_space_scan.py
++++ b/state_space_scan.py
+@@ -1,57 +1,16 @@
+-"""First-order linear state-space scan (selective SSM recurrence).
+-
+-Public entry point:
+-    ``state_space_scan(A, B, C, x) -> y``
+-
+-This is the core sequence operator inside a state-space / linear-recurrence block.
+-A hidden state ``h`` of shape ``(B, D, N)`` is evolved along the time axis ``L`` by a
+-first-order linear recurrence whose per-timestep coefficients are *selective* (they
+-depend on the position ``t``): the state decays/mixes through ``A[t]`` and is driven
+-by the outer product of the input ``x[t]`` with the input projection ``B[t]``. The
+-per-timestep output ``y[t]`` reads the state out through the output projection
+-``C[t]``.
+-
+-Contract
+---------
+-- ``A``: shape ``(B, L, D, N)`` — the per-timestep state-transition coefficient
+-  (multiplicative, applied elementwise to the state). Floating dtype, CUDA tensor.
+-- ``B``: shape ``(B, L, N)`` — the per-timestep input projection.
+-- ``C``: shape ``(B, L, N)`` — the per-timestep output projection.
+-- ``x``: shape ``(B, L, D)`` — the input sequence.
+-- ``B`` (batch), ``L`` (time), ``D`` (channels), ``N`` (state width). All four
+-  tensors share dtype and device. Primary dtype ``torch.float32``; ``bfloat16`` /
+-  ``float16`` inputs are also accepted (the state is accumulated in float32).
+-
+-Functionality, per batch element and per channel ``d`` / state index ``n``, marching
+-``t = 0, 1, ..., L-1`` along the time axis with initial state ``h[-1] = 0``::
+-
+-    bx[t]         = x[t, :, None] * B[t, None, :]      # (D, N) input drive at step t
+-    h[t]          = A[t] * h[t-1] + bx[t]              # (D, N) first-order recurrence
+-    y[t, d]       = sum_n C[t, n] * h[t, d, n]         # (D,)  read-out through C[t]
+-
+-The recurrence is **causal and strictly ordered in time**: ``h[t]`` (and therefore
+-``y[t]``) depends only on inputs at steps ``0..t``. The state is accumulated in
+-float32 for numerical stability; every ``(batch, d, n)`` track evolves independently
+-along ``t``.
+-
+-Returns
+--------
+-``y``: shape ``(B, L, D)``, dtype matching ``x``.
+-
+-Error contract
+---------------
+-- ``TypeError`` if any of ``A``, ``B``, ``C``, ``x`` is not a floating
+-  (float16/bfloat16/float32/float64) ``torch.Tensor``, or their dtypes differ.
+-- ``ValueError`` if the ranks are wrong (``x`` not 3-D, ``A`` not 4-D, ``B``/``C``
+-  not 3-D) or the shared dimensions ``(B, L, D, N)`` are inconsistent across inputs.
+-
+-Note on allowed operations
+---------------------------
+-Library sequence-scan primitives that would perform the whole recurrence in one call
+-are out of scope — the scan is built explicitly. The current implementation walks the
+-time axis in a plain Python ``for`` loop, one timestep per iteration, so it issues
+-O(L) dependent kernel launches and serializes on the time dimension. It is correct
+-but leaves the sequence-level parallelism of the recurrence on the table.
++"""REVIEWER-ONLY baseline2 (soundness probe) for ssm-selective-scan-firstorder.
++
++A CORRECT implementation that is mechanically DIFFERENT from the oracle's
++doubling prefix scan: a blocked / chunk-parallel scan. The time axis is cut into
++fixed-size chunks; each chunk's local prefix states (assuming a zero incoming state)
++and its cumulative transition product are computed in parallel across chunks, the
++per-chunk boundary state is carried sequentially across the (few) chunks, and the
++incoming carry is then propagated back into every step. Sequential depth is
++~chunk + L/chunk instead of L. It uses cumprod only to build the intra-chunk
++transition products (a primitive building block, NOT a library scan of the full
++recurrence). It must earn a POSITIVE wall-time reward on its own merit; if the
++verifier could only reward the exact oracle code it would be oracle-overfit and must
++be fixed. Reviewer-only; NEVER baked into the image.
+ """
+ 
+ import torch
+@@ -85,25 +44,49 @@ def _validate(A, B, C, x):
+ 
+ 
+ def state_space_scan(A, B, C, x):
+-    """See module docstring for the full contract.
+-
+-    Naive sequential reference: march the time axis one step at a time in a Python
+-    loop, accumulating the (D, N) hidden state in float32. Correct but latency-bound
+-    on the sequential time dependency (O(L) dependent steps / kernel launches).
+-    """
++    """Blocked / chunk-parallel state-space scan (reviewer baseline2)."""
+     Bsz, L, D, N = _validate(A, B, C, x)
+     out_dtype = x.dtype
+     Af = A.to(torch.float32)
+     Bf = B.to(torch.float32)
+     Cf = C.to(torch.float32)
+     xf = x.to(torch.float32)
+-
+-    bx = xf.unsqueeze(-1) * Bf.unsqueeze(2)          # (B, L, D, N) input drive
+-    h = torch.zeros(Bsz, D, N, dtype=torch.float32, device=A.device)
+-    hs = []
+-    for t in range(L):                               # sequential O(L) time loop
+-        h = Af[:, t] * h + bx[:, t]                  # (B, D, N)
+-        hs.append(h)
+-    hs = torch.stack(hs, dim=1)                      # (B, L, D, N)
+-    y = (hs * Cf.unsqueeze(2)).sum(dim=-1)           # (B, L, D) read-out through C
++    bx = xf.unsqueeze(-1) * Bf.unsqueeze(2)          # (B, L, D, N)
++
++    chunk = 64
++    pad = (-L) % chunk
++    if pad:
++        # pad with identity transitions (A=1) and zero drive so padded steps do not
++        # perturb the real states; sliced off at the end.
++        Af = torch.cat([Af, Af.new_ones(Bsz, pad, D, N)], dim=1)
++        bx = torch.cat([bx, bx.new_zeros(Bsz, pad, D, N)], dim=1)
++    Lp = L + pad
++    nc = Lp // chunk
++    Ac = Af.view(Bsz, nc, chunk, D, N)
++    Xc = bx.view(Bsz, nc, chunk, D, N)
++
++    # intra-chunk: sequential prefix (h_in = 0) + cumulative transition product, all
++    # chunks in parallel. Only `chunk` sequential steps.
++    h_local = torch.zeros(Bsz, nc, D, N, dtype=torch.float32, device=A.device)
++    local = []
++    for j in range(chunk):
++        h_local = Ac[:, :, j] * h_local + Xc[:, :, j]
++        local.append(h_local)
++    local = torch.stack(local, dim=2)                # (B, nc, chunk, D, N)
++    Acum = torch.cumprod(Ac, dim=2)                  # inclusive per-chunk transition product
++
++    # inter-chunk: carry the boundary state across the (few) chunks sequentially.
++    carry = torch.zeros(Bsz, D, N, dtype=torch.float32, device=A.device)
++    carries = []
++    chunk_A = Acum[:, :, -1]                          # (B, nc, D, N) full-chunk transition
++    chunk_final = local[:, :, -1]                     # (B, nc, D, N) local final state
++    for c in range(nc):
++        carries.append(carry)                         # state entering chunk c
++        carry = chunk_A[:, c] * carry + chunk_final[:, c]
++    carries = torch.stack(carries, dim=1)            # (B, nc, D, N)
++
++    # combine: h[chunk c, step j] = local + (cumulative A up to j) * incoming carry
++    h = local + Acum * carries.unsqueeze(2)          # (B, nc, chunk, D, N)
++    h = h.reshape(Bsz, Lp, D, N)[:, :L]              # (B, L, D, N)
++    y = (h * Cf.unsqueeze(2)).sum(dim=-1)            # (B, L, D)
+     return y.to(out_dtype)

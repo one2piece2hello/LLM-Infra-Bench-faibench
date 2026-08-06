@@ -1,0 +1,1 @@
+{"oracle_ms": 238.349649, "note": "calibrated on the authoring CPU lane (Intel Sapphire Rapids, gpu_num 0); mean of the oracle-mode (238.090499) and baseline2-mode (238.608798) anchors. See tests/ref_speedup.caveat.md to re-measure."}

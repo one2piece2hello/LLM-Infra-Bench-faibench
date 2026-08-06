@@ -1,0 +1,32 @@
+{
+  "schema_version": "kernelbench_correctness_manifest_v1",
+  "task_id": "compile-cache-key-canonicalize",
+  "task_kind": "acceleration",
+  "expected_case_count": 12,
+  "primary_workload": "signature-identity-count",
+  "ref_speedup": 1.0,
+  "ref_speedup_note": "Anchor 4.0 calibrated in oracle mode on the authoring CPU lane (Intel Sapphire Rapids). tests/ref_speedup.txt is authoritative at scoring; this file is only the in-image fallback. See tests/ref_speedup.caveat.md to re-measure on your hardware.",
+  "metric": "recompile_count",
+  "direction": "higher_is_better",
+  "target_hardware": "cpu (x86-64 Sapphire Rapids; pure-Python stdlib, fixed FNV-1a/sha1 hash -> deterministic count, no profiler)",
+  "value_axis": "recompile_count = number of DISTINCT identities produced by identity_key over a fixed labeled workload of request signatures; the naive baseline emits one identity per spelling (more identities than true classes), a full normalizer emits one per true equivalence class",
+  "correctness_axes": [
+    "returns_string_for_various",
+    "deterministic_repeat_same_object",
+    "deterministic_fresh_build",
+    "distinct_ops_distinct_keys",
+    "distinct_shapes_distinct_keys",
+    "distinct_dtypes_distinct_keys",
+    "distinct_nondefault_flag_distinct_keys",
+    "noncommutative_order_significant",
+    "distinct_operand_count_distinct_keys",
+    "no_false_merge_full_workload",
+    "handles_edge_schema",
+    "many_distinct_programs_pairwise_distinct"
+  ],
+  "safety_gate": "no false merge: over the whole labeled workload no identity may be shared by two DIFFERENT true equivalence classes (checked by count_bench.py verify and by the no_false_merge_full_workload case); a false merge = correctness failure -> reward 0",
+  "public_symbol": "identity_key",
+  "primary_edit_paths": [
+    "/app/repo/identity_key.py"
+  ]
+}

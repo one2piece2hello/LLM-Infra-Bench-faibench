@@ -1,0 +1,22 @@
+{
+  "max_submissions": 16,
+  "min_submissions": 1,
+  "note": "dev reward is an in-session PUBLIC PROXY: it launches the candidate's vLLM server (the SAME /app/submission/launch_server.sh the grade launches), confirms it serves the PUBLIC dev prompts, and reports serving throughput (1000/median_ms). Used ONLY to rank best-of-k; the runner end-of-session /tests grade (ABBA median speedup over the HIDDEN mixed-burst workloads behind a greedy token-parity gate + calibrated anchor) is authoritative. This private tree bakes NO strong baseline, NO hidden prompts and NO calibrated ref_speedup.",
+  "perf_metric": "reward",
+  "reward_form": "RAW serving throughput 1000/median_ms on public prompts (higher is better); a COARSE proxy: monotonic in single-request speed but it does NOT run the hidden concurrent bursts and CANNOT verify the greedy token-parity gate. correctness proxy = server launches and returns non-empty completions.",
+  "schema_version": "kernelbench_loop_manifest_v1",
+  "scope": [
+    "submission/launch_server.sh"
+  ],
+  "scoring": "dev_eval.py: launch candidate vLLM server; serve PUBLIC prompts; throughput = 1000/median_ms",
+  "task_id": "e2e-vllm-scheduler-mixed-batch-serving-loop16",
+  "gpu_dev_workload_note": "REDUCED workload for the GPU per-round loop: ONE server launch + 3 public prompts x 3 reps (single-request), vs the grade's 3 launches x 9 workload regimes (single-request anchors + concurrent heterogeneous bursts). A per-round pass is a single server boot plus a handful of requests.",
+  "fidelity_gap": "The dev proxy measures single-request latency + liveness only. It does NOT reproduce the grade's concurrent burst makespans and does NOT check the welded greedy token-parity gate (the grade recomputes reference greedy outputs from the hidden baseline). A candidate that trades output correctness for latency can look good on the dev proxy and still score 0 at grading — the sanitize feedback states this explicitly.",
+  "thresholds": {
+    "launch_server": "/app/submission/launch_server.sh",
+    "model_path": "/app/model",
+    "port": 30011,
+    "reps": 3,
+    "boot_timeout_sec": 1200
+  }
+}

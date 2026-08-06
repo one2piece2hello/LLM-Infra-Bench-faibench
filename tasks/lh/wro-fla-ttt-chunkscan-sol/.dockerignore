@@ -1,0 +1,26 @@
+# .dockerignore MUST live at the BUILD CONTEXT ROOT (this directory) — docker/BuildKit does
+# NOT read environment/.dockerignore. Build with:  docker build -f environment/Dockerfile .
+# Build context is this task directory. The reference implementation and every authoring
+# artefact MUST NOT reach any image layer.
+oracle.patch
+negative.patch
+baseline2.patch
+*.patch
+degraded_scope.py
+scope_card.json
+degradation_manifest.json
+task_meta.json
+base_image_map.json
+loop_map_entry.json
+PATCH_PROVENANCE.json
+IMAGE_*.json
+sr_validate/
+sr_validate_p2r2/
+tests_srpayload/
+git_audit_out/
+intermediates/
+**/__pycache__/
+**/*.pyc
+*.bak
+*.pre_*
+**/*.pre_*

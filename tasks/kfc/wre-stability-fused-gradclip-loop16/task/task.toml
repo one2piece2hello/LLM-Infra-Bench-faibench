@@ -1,0 +1,56 @@
+# wre-stability-fused-gradclip — GPU:H20. PERFORMANCE (implement from an empty stub).
+# 训练稳定性: global-norm gradient clipping. PERFORMANCE (speedup).
+
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wre-stability-fused-gradclip-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "A clean workspace whose single editable file ships a required function clip_grads_by_global_norm that is not implemented (it raises …"
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wre-stability-fused-gradclip-loop16:v1@sha256:6a8b830aec516d1796317a1f93f039dd26246d11f5ebeba7704a2c1bc44e447f
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wre-stability-fused-gradclip-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wre-stability-fused-gradclip-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 4
+memory_mb = 32768
+gpus = 1
+gpu_types = ["H20"]
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "performance"
+contract_pattern = "kernelbench_generic_v1"
+timing_metric = "speedup"
+primary_edit_paths = ["submission/kernel.py"]
+forbidden_edit_paths = ["*"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+reward_formula = "performance: reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0 — 0.5 at parity with the oracle, capped 1.0 at oracle^2; 0 if a hard gate fails or speedup <= 1. ref_speedup source unchanged (tests/ref_speedup.txt or the in-image manifest)."
+ref_speedup = 8.207081
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "NVIDIA H20"
+
+[loop]
+# NOTE: the /opt/loop harness baked into the image applies its own 3/16 in-session budget; for in-session loop scoring the image is authoritative.
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+mode = "baked"
+feedback_surface = "/opt/loop/submit.sh"

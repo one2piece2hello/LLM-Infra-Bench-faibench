@@ -1,0 +1,14 @@
+{
+  "max_submissions": 16,
+  "min_submissions": 1,
+  "note": "dev reward is an in-session proxy; the runner end-of-session /tests score is authoritative.",
+  "perf_metric": "speedup",
+  "reward_form": "log-ratio: min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0; speedup<=1 or any hard gate -> 0.0",
+  "schema_version": "kernelbench_loop_manifest_v1",
+  "scope": [
+    "memsim/accountant.py",
+    "memsim/scheduler.py"
+  ],
+  "scoring": "task tests/test.sh in candidate mode on the live /app/repo",
+  "task_id": "wro-memory-accounting-sim-coupled-loop16"
+}

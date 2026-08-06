@@ -1,0 +1,145 @@
+# Performance Optimization Task
+
+You are working on the dense matrix-multiply kernel at the heart of a
+high-throughput inference server's linear layers. The file `gemm_kernel.cu`
+implements a matrix multiply — it computes the product of two matrices on the
+GPU. The Python wrapper `gemm.py` compiles this kernel and calls it; **you edit
+only `gemm_kernel.cu`.**
+
+## Behavioral contract
+
+Given `A` of shape `(M, K)` and `B` of shape `(K, N)`, compute the matrix product
+
+```
+C[m, n] = sum over k of A[m, k] * B[k, n]        # C has shape (M, N)
+```
+
+1. `A`, `B`: 2-D, contiguous, `torch.float32` CUDA tensors. The inner dimension
+   matches (`A.shape[1] == B.shape[0] == K`).
+2. Accumulation is performed in **float32**; the returned `C` is `(M, N)`,
+   `torch.float32`.
+3. The result must be correct for arbitrary `M`, `N`, `K` — including a `K` that
+   is **not** a multiple of any tile width, a very **large** `K`, a small `K`,
+   and the `M = N = 1` case (a single long inner-product). Row order is preserved.
+
+Public entry point (invoked by the fixed wrapper; do NOT change its meaning):
+
+```python
+def gemm(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:  # C = A @ B, float32
+    ...
+```
+
+Error contract (enforced by the wrapper): non-`float32` or dtype-mismatched
+`A` / `B` → `TypeError`; non-2-D inputs or a mismatched inner dimension →
+`ValueError`.
+
+## Why the current implementation is slow
+
+The current kernel assigns one thread block to each output tile, and that block
+walks the **entire inner dimension `K`** on its own, accumulating in float32. It
+is **correct**, and for large outputs it keeps the device busy. But the metric
+for this task is calibrated on shapes with a **small number of output rows and
+columns and a very large inner dimension `K`** (e.g. `M, N` in the low hundreds
+while `K` is tens of thousands). On those shapes only a handful of output tiles
+exist, so only a handful of blocks are launched — most of the GPU sits idle while
+each block serially grinds through its long walk over `K`. The runtime is
+dominated by that long serial pass over `K` on too few blocks.
+
+Make it **faster on the GPU for these small-output / large-`K` shapes** while
+keeping the contract above and float32 accumulation. You may use any GPU
+technique available in the image, as long as the result stays within the
+verifier's tolerance of a high-precision reference. If your approach forms
+several intermediate results and adds them together to produce each output
+element, add them in a **fixed, well-defined order** so the result is
+reproducible run to run (an approach whose output drifts between runs may fall
+outside tolerance).
+
+**Forbidden:** do not delegate the multiply to a prebuilt matrix-multiply
+library or framework primitive — specifically **cuBLAS / cublasLt / cutlass** and
+libtorch's matmul (`at::matmul`, `torch::matmul`, `at::mm`, `torch::mm`,
+`.matmul(...)`), as well as `torch.matmul` / `torch.mm` / `F.linear` / the `@`
+operator on the Python side. The scoring harness scans your submitted
+`gemm_kernel.cu` for those tokens and scores the task 0 if present (do not
+reference them even in comments). Implement the multiply yourself.
+
+## Correctness comes first
+
+The verifier compares your `C` against a high-precision reference on multiple
+workloads — small-output/large-`K` shapes, a `K` that is not a tile
+multiple, a small `K`, an `M = N = 1` inner-product, an identity operand,
+error-contract probes, metamorphic checks (scaling `A` by a constant scales `C`;
+permuting rows of `A` permutes rows of `C`), and a hidden very-large-`K` case
+that stresses the accumulation — within a fixed rtol/atol. A faster
+result outside tolerance on even one case scores zero.
+
+## Scope
+
+Optimize the kernel in `gemm_kernel.cu` only. Do **not** edit `gemm.py`, tests,
+benchmark harnesses, workloads, or dependency/build files. The final submitted
+diff must contain only changes to `gemm_kernel.cu`.
+
+## How this task is scored — ONE single graded submission (READ CAREFULLY)
+
+You get **exactly ONE submission**. There is no iteration loop, no dev feedback
+round, and no second chance.
+
+1. Read the current implementation of `/app/repo/gemm_kernel.cu`, decide on your
+   approach, and make **all** the edits you want in `/app/repo`.
+2. Self-test as much as you like with scratch scripts **you** write yourself
+   (put them outside the scored file, e.g. under `/tmp`). Verify your output
+   against the behavioral contract above on your own inputs, and measure your own
+   before/after to convince yourself the change genuinely faster.
+3. When — and only when — you are confident, submit **once**:
+
+   ```
+   bash /opt/loop/submit.sh
+   ```
+
+**Submitting ends the task.** The moment `submit.sh` returns, this task is over:
+the state of `/app/repo` at that instant is what gets graded, no iteration
+feedback is given, and a second call to `submit.sh` is **refused**. You cannot
+submit, look at a score, and try again.
+
+Because of that, everything rides on the work you do **before** you submit:
+think the design through, read the baseline carefully, self-test the contract
+(including the boundary and error cases described above), and only then submit.
+Do not submit a half-finished or untested edit hoping to refine it later — there
+is no later.
+
+The grade is produced by a full, trusted end-of-session verifier (more workloads
+than anything you can see), so your one submission must be genuinely correct as
+well as fast.
+
+**🎓 Explain your work for a beginner.** Before you edit, state your approach:
+what limits the current code and what you intend to change. After you edit
+and before you submit, give a short, concrete, step-by-step account of what you
+changed, *why* it should be better in terms of the actual code path, and how you
+convinced yourself it is still correct.
+
+## 🔴 Red line (hard — ANY one of these makes the whole task score 0)
+
+The scoring machinery is off-limits. Solve this task **independently**, using
+ONLY the code in `/app/repo`, the sanitized feedback that `submit.sh` returns,
+and your own knowledge and reasoning.
+
+- Do **NOT** read, `cat`, `open`, `less`, `head`/`tail`, `grep`, `find`, or edit
+  ANY verifier / correctness / timing / scoring / hidden-test file or directory,
+  wherever it may live. Running `bash /opt/loop/submit.sh` is the ONLY sanctioned
+  interaction with the scoring machinery.
+- Do **NOT** run any verifier directly or try to reproduce or reverse-engineer it
+  — score ONLY by calling `bash /opt/loop/submit.sh`.
+- Do **NOT** search for, print, or infer the hidden workloads, seeds, thresholds,
+  the metric name, or the reference speedup from any source.
+- Do **NOT** fetch or look up the source PR, the upstream repository, or a
+  reference solution (no web search, no `git` remote fetch, no network to the
+  source), whether the internet is on or off.
+- Do **NOT** use, quote, or condition your code on any verifier / scoring / source
+  material, however you might have come to see it.
+
+Stay inside `/app/repo` and scratch directories you create yourself; use only
+what `submit.sh` returns for scoring signal.
+
+## 提交方式
+
+本题只有**一次**评分提交(kfc 全子集单次)。改完后运行一次 `bash /opt/loop/submit.sh`:它给当前 `/app/repo` 评分并**立即定稿**(无需再单独调 `--finalize`,也没有第二次机会 —— 再次调用只会重新定稿同一份已记录的最佳快照,不给新改动评分)。请先用你自己的脚本充分自测再提交。
+改动留在工作树里,不需要 `git commit`(判分读工作树,仓库 HEAD 必须停在初始基线 commit 上)。

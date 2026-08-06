@@ -1,0 +1,82 @@
+# e2e-b1-kv-traffic-sol — Type-3 E2E optimisation task.
+
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "kv-traffic-sol"
+bench = "e2e"
+kind = "performance"
+language = "python"
+title = "Paged KV-cache traffic — move the cache at the speed of the hardware"
+ext_id = "e2e-b1-kv-traffic-sol"
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# OPEN-SOURCE: build from this task package (no private registry):
+#   cd <this-dir>/task && docker build -f environment/Dockerfile -t fai/b1-kv-traffic-sol:oss .
+# (original private prebuilt image, provenance only: <internal registry>/kernelbench/e2e-b1-kv-traffic-sol@sha256:c145d6dc9f52acbcb147236f75be12e0f13783daae2d5fd16372cf2943eea363)
+# 🔁 LOOP16: the shipped image is the loop16 overlay (`crane append` onto the :oss base, purely
+#    additive — /opt/loop + /app/instruction.md only, NOTHING under tests/ changed). Build in two steps:
+#      docker build -f environment/Dockerfile             -t fai/b1-kv-traffic-sol:oss .
+#      docker build -f environment/loop_overlay/Dockerfile -t fai/b1-kv-traffic-sol:oss-loop16 environment/loop_overlay
+#    The single-shot form (:oss) is a valid alternative; the graded surface (tests/) is identical in both.
+[environment]
+docker_image = "fai/b1-kv-traffic-sol:oss-loop16"
+dockerfile = "environment/loop_overlay/Dockerfile"
+dockerfile_single_shot = "environment/Dockerfile"
+build_timeout_sec = 1200   # prebuilt image (v4: /opt/verifier removed, corrected reward prose), just pull
+cpus = 8
+memory_mb = 81920
+gpus = 1
+# 开源版: H20 是 ref_speedup 的标定卡,不是硬性限制。换卡可跑,但须按
+# tests/verifier-correctness-manifest.json 的 recalibrate_howto 重标锚点;
+# 并用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像。
+gpu_types = ["H20"]
+storage_mb = 40000
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "e2e_optimization"
+submission_root = "/app/repo/submission"
+submission_entry = "/app/repo/submission/kv_traffic.py"
+forbidden_edit_paths = [
+    "/tests",
+    "/opt/verifier",
+    "/opt/verifier/harness/bench_kvtraffic.py",
+    "/opt/verifier/harness/baseline_kv_traffic.py",
+    "/opt/verifier/harness/hidden_suite.json",
+    "/opt/verifier/compute_reward.py",
+    "/opt/verifier/verifier-correctness-manifest.json",
+    "/app/timer.sh",
+    "/app/.timer",
+]
+result_paths = ["/logs/verifier"]
+
+[verifier.frozen]
+note = "v1 声明不出 primary_edit_paths:整个 repo 可编辑,被计分的交付物是 [verifier].submission_entry;评分面靠 [verifier].forbidden_edit_paths + tests/test.sh 里的 sha256 门冻结。"
+
+[primary_metric]
+name = "log_speedup_vs_ref_speedup"
+goal = "maximize"
+reward_formula = "reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0 in [0,1]; speedup == strong baseline => 0; speedup == ref_speedup (2.5799320719769216) => 0.5; speedup >= ref_speedup^2 => 1.0"
+ref_speedup = 2.5799320719769216
+ref_speedup_source = "tests/verifier-correctness-manifest.json"
+calibrated_on = "NVIDIA H20"
+
+# loop16: the shipped image bakes /opt/loop; the in-session dev proxy runs the candidate engine on
+# the author's PUBLIC dev suite (bit-exact round-trip gated) for a RAW achieved-bandwidth best-of-k
+# ranking signal (NO strong baseline, NO hidden suite, NO calibrated anchor baked). At most 16
+# submissions, at least 1; the model decides when to stop (min=1 so --finalize works any time). The
+# graded score is the runner's fresh end-of-session tests/ grade (strong-baseline ABBA over hidden
+# workloads + calibrated anchor).
+[loop]
+min_submissions = 1
+max_submissions = 16
+submit = "bash /opt/loop/submit.sh"

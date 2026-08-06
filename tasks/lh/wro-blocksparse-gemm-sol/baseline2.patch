@@ -1,0 +1,121 @@
+diff --git a/blocksp/matmul.py b/blocksp/matmul.py
+index 2b8aeeb..cc51b0c 100644
+--- a/blocksp/matmul.py
++++ b/blocksp/matmul.py
+@@ -28,41 +28,90 @@ contribute, so both the weight traffic and the matmul work scale with ``nnz``, n
+ full ``K``. The PUBLIC SIGNATURE and NUMERICAL CONTRACT are fixed and MUST be preserved;
+ only the implementation in this file is in scope.
+ 
+-SLOW-BUT-CORRECT baseline: the compressed blocks are first SCATTERED back into a full
+-dense ``[K, N]`` fp16 weight buffer in global memory (zeros for every pruned block), and
+-a dense matmul is then run on that materialised buffer. The dense weight is written to
+-and read back from device memory (a full ``[K, N]`` pass, ``num_blocks / nnz`` times the
+-bytes of the stored blocks), and the matmul does the full dense ``K`` work including the
+-pruned (zero) blocks. The block is memory/compute-bound; bring it up to production speed
+-without changing the contract.
++PARTIAL implementation (correct, fused, but under-tuned tiles): a single fused kernel iterates ONLY over the ``nnz`` stored
++nonzero row-blocks. For each stored block ``p`` it reads its logical index ``kb =
++k_idx[p]``, streams the ``[block_k, BLOCK_N]`` weight block from ``w_blocks`` and the
++matching ``[BLOCK_M, block_k]`` activation slice at logical K columns ``kb*block_k`` from
++``a``, and accumulates their product with a matrix engine -- the pruned (zero) blocks are
++NEVER touched, the dense ``[K, N]`` weight is NEVER materialised, and only the ``nnz``
++stored blocks are read. Both the weight traffic and the matmul FLOPs scale with the block
++density. A grouped program ordering improves L2 locality.
+ """
+ import torch
++import triton
++import triton.language as tl
++
++
++@triton.jit
++def _blocksp_matmul_kernel(a_ptr, wb_ptr, kidx_ptr, c_ptr,
++                           M, N, K, NNZ, BLOCK_K,
++                           stride_am, stride_ak, stride_wbk, stride_wbn,
++                           stride_cm, stride_cn,
++                           BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
++                           BK: tl.constexpr, KT: tl.constexpr, GROUP_M: tl.constexpr):
++    # One program computes a [BLOCK_M, BLOCK_N] output tile by summing the contributions of
++    # the NNZ stored nonzero K-blocks (each of BK = block_k rows). The K-dim of each block
++    # is tiled into fixed KT-sized chunks so the tl.dot tile (and its pipelined shared-memory
++    # footprint) stays bounded regardless of block_k. KT divides BK (block_k is a multiple
++    # of 32; KT in {32, 64}).
++    pid = tl.program_id(0)
++    num_pid_m = tl.cdiv(M, BLOCK_M)
++    num_pid_n = tl.cdiv(N, BLOCK_N)
++    num_pid_in_group = GROUP_M * num_pid_n
++    group_id = pid // num_pid_in_group
++    first_pid_m = group_id * GROUP_M
++    group_size_m = min(num_pid_m - first_pid_m, GROUP_M)
++    pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)
++    pid_n = (pid % num_pid_in_group) // group_size_m
++
++    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
++    offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
++    offs_kt = tl.arange(0, KT)
++    n_mask = offs_n < N
++
++    a_base = a_ptr + offs_m[:, None] * stride_am
++    n_steps = BK // KT                                       # KT-chunks per stored block (constexpr)
++
++    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
++    for p in range(0, NNZ):
++        kb = tl.load(kidx_ptr + p)                           # logical block index of stored block p
++        wb_row0 = p * BK                                     # first row of this stored block in w_blocks
++        for t in range(0, n_steps):
++            r0 = t * KT
++            k_cols = kb * BK + r0 + offs_kt                  # [KT] logical K columns of this chunk
++            a_sub = tl.load(a_base + k_cols[None, :] * stride_ak,
++                            mask=(offs_m[:, None] < M) & (k_cols[None, :] < K), other=0.0)  # [BLOCK_M, KT]
++            w_rows = wb_row0 + r0 + offs_kt                  # [KT] rows in w_blocks
++            w_sub = tl.load(wb_ptr + w_rows[:, None] * stride_wbk + offs_n[None, :] * stride_wbn,
++                            mask=(w_rows[:, None] < NNZ * BK) & (offs_n[None, :] < N), other=0.0)  # [KT, BLOCK_N]
++            acc += tl.dot(a_sub, w_sub)
++
++    c_ptrs = c_ptr + offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn
++    tl.store(c_ptrs, acc.to(tl.float16), mask=(offs_m[:, None] < M) & (offs_n[None, :] < N))
+ 
+ 
+ def blocksp_matmul(a: torch.Tensor, w_blocks: torch.Tensor, k_idx: torch.Tensor,
+                    block_k: int) -> torch.Tensor:
+-    """Return ``a @ W`` as fp16 ``[M, N]`` for a structured K-block-sparse ``W``.
+-
+-    Contract (all tensors CUDA):
+-      a        : fp16  [M, K]                 (K a multiple of block_k)
+-      w_blocks : fp16  [nnz * block_k, N]     (nonzero K row-blocks, ascending block order)
+-      k_idx    : int32 [nnz]                  (logical block index of each stored block)
+-      block_k  : int, divides K
+-    """
++    """Return ``a @ W`` as fp16 ``[M, N]`` for a structured K-block-sparse ``W``."""
+     M, K = a.shape
+     KB, N = w_blocks.shape
+     nnz = k_idx.shape[0]
+     assert K % block_k == 0, "block_k must divide K"
+     assert KB == nnz * block_k, "w_blocks must have nnz*block_k rows"
+ 
+-    # SLOW-BUT-CORRECT: scatter the stored nonzero blocks back into a full dense [K, N]
+-    # fp16 weight (zeros for pruned blocks), then run a dense fp32 matmul on it. An extra
+-    # full [K, N] write/read for the densified weight (num_blocks/nnz times the bytes of
+-    # the stored blocks), and the matmul does the full dense K work including zero blocks.
+-    w = torch.zeros((K, N), dtype=torch.float32, device=a.device)
+-    kidx = k_idx.to(torch.int64)
+-    for p in range(nnz):
+-        kb = int(kidx[p].item())
+-        w[kb * block_k:(kb + 1) * block_k, :] = w_blocks[p * block_k:(p + 1) * block_k, :].to(torch.float32)
+-    c = torch.matmul(a.to(torch.float32), w)                 # [M, N] fp32
+-    return c.to(torch.float16)
++    BLOCK_M, BLOCK_N, GROUP_M = 64, 32, 1
++    # KT bounds the tl.dot K-tile (and its pipelined shared-memory footprint) regardless of
++    # block_k. block_k is a multiple of 32; use KT=64 when block_k is a multiple of 64, else 32.
++    KT = 64 if (block_k % 64 == 0) else 32
++    w_blocks = w_blocks.contiguous()
++    k_idx = k_idx.to(torch.int32).contiguous()
++    c = torch.empty((M, N), device=a.device, dtype=torch.float16)
++    grid = (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N),)
++    _blocksp_matmul_kernel[grid](
++        a, w_blocks, k_idx, c,
++        M, N, K, nnz, block_k,
++        a.stride(0), a.stride(1), w_blocks.stride(0), w_blocks.stride(1),
++        c.stride(0), c.stride(1),
++        BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N, BK=block_k, KT=KT, GROUP_M=GROUP_M,
++        num_warps=2, num_stages=2)
++    return c

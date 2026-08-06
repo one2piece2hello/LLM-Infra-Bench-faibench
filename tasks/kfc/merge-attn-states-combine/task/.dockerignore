@@ -1,0 +1,24 @@
+# .dockerignore MUST live at the BUILD CONTEXT ROOT (this directory) — docker/BuildKit does
+# NOT read environment/.dockerignore. Build with:  docker build -f environment/Dockerfile .
+# The reference implementation and every authoring artefact MUST NOT reach an image layer.
+*.patch
+oracle*
+negative*
+baseline2*
+scope_card.json
+degradation_manifest.json
+task_meta.json
+loop_map_entry.json
+job.yaml
+intermediates/
+_retrofit*
+sr_validate*
+leak_audit/
+self_check/
+variants/
+**/__pycache__/
+**/*.pyc
+*.bak
+*.bak_*
+*.pre_*
+**/*.pre_*

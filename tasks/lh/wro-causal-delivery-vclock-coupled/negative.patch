@@ -1,0 +1,120 @@
+--- a/causal/buffer.py
++++ b/causal/buffer.py
+@@ -1,11 +1,10 @@
+-"""Pending-message store for the causal-delivery subsystem (distributed-correctness backend).
++"""Pending-message store for the causal-delivery subsystem -- ORACLE.
+ 
+-Buffers messages that have arrived but are not yet causally deliverable, and exposes the buffered
+-messages to the delivery driver in ``channel.py``.
+-
+-A message is ``(msg_id, sender_pid, vc)`` where ``vc`` is a VectorClock (the sender's clock after its
+-own tick, i.e. ``vc[sender] = D_sender[sender] + 1``). Deliverability against a delivered-clock ``D``:
+-    vc[sender] == D[sender] + 1   and   vc[k] <= D[k] for every k != sender.
++Indexes buffered messages by their sender: a message from ``pid`` with ``vc[pid] == c`` can only
++become deliverable once the delivered-clock reaches ``D[pid] == c - 1``. ``candidates(pid, need)``
++returns the buffered messages from ``pid`` whose required count equals ``need`` -- the only messages
++that can newly fire when ``D[pid]`` advances to ``need`` -- without scanning unrelated messages.
++Observable results identical to the naive version.
+ """
+ from __future__ import annotations
+ 
+@@ -25,19 +24,39 @@
+ 
+ class PendingStore:
+     def __init__(self):
+-        self._pending = []          # list of (msg_id, pid, vc)
++        self._by_id = {}                    # msg_id -> (pid, vc)
++        self._by_sender_need = {}           # (pid, need_count) -> set(msg_id)
++
++    def _key(self, pid, vc):
++        return (pid, vc.get(pid))
+ 
+     def add(self, msg_id, pid, vc):
+-        self._pending.append((msg_id, pid, vc))
++        self._by_id[msg_id] = (pid, vc)
++        self._by_sender_need.setdefault(self._key(pid, vc), set()).add(msg_id)
+ 
+     def remove(self, msg_id):
+-        for i, (mid, _, _) in enumerate(self._pending):
+-            if mid == msg_id:
+-                self._pending.pop(i)
+-                return
++        ent = self._by_id.pop(msg_id, None)
++        if ent is None:
++            return
++        pid, vc = ent
++        k = self._key(pid, vc)
++        s = self._by_sender_need.get(k)
++        if s is not None:
++            s.discard(msg_id)
++            if not s:
++                del self._by_sender_need[k]
+ 
+     def count(self):
+-        return len(self._pending)
++        return len(self._by_id)
+ 
+     def all(self):
+-        return list(self._pending)
++        return [(mid, p, v) for mid, (p, v) in self._by_id.items()]
++
++    def candidates(self, pid, need):
++        """Buffered (msg_id, pid, vc) from ``pid`` requiring exactly ``need`` = D[pid]+1; the only
++        messages that can newly become deliverable when D[pid] advances to ``need``."""
++        out = []
++        for mid in self._by_sender_need.get((pid, need), ()):
++            p, vc = self._by_id[mid]
++            out.append((mid, p, vc))
++        return out
+--- a/causal/channel.py
++++ b/causal/channel.py
+@@ -1,17 +1,4 @@
+-"""Causal-delivery channel / driver (distributed-correctness backend).
+-
+-Drives causal-ordered delivery for one receiver: each arriving message is buffered, then the driver
+-delivers every message that is (transitively) now deliverable, in a deterministic order, updating the
+-delivered vector clock.
+-
+-Observable contract:
+-  * ``deliver(msg)`` where ``msg`` = ``(msg_id, sender_pid, vc_dict)`` -> list of msg_ids delivered as
+-    a result of this arrival, in delivery order (empty if buffered; possibly several if it unblocks a
+-    chain). Among simultaneously deliverable messages, the smallest ``msg_id`` goes first.
+-  * ``delivered_ids()`` -> the full delivery order so far.
+-  * ``pending_count()`` -> number of buffered messages.
+-  * ``clock()`` -> current delivered-clock as a dict (nonzero entries).
+-"""
++"""Causal-delivery channel / driver (distributed-correctness backend)."""
+ from __future__ import annotations
+ 
+ from .buffer import PendingStore, is_deliverable
+@@ -24,28 +11,9 @@
+         self.store = PendingStore()
+         self._delivered = []
+ 
+-    def _next_deliverable(self):
+-        best = None
+-        for (mid, pid, vc) in self.store.all():
+-            if is_deliverable(pid, vc, self.D):
+-                if best is None or mid < best[0]:
+-                    best = (mid, pid, vc)
+-        return best
+-
+     def deliver(self, msg):
+-        msg_id, pid, vc_dict = msg
+-        self.store.add(msg_id, pid, VectorClock(vc_dict))
+-        out = []
+-        while True:
+-            nxt = self._next_deliverable()
+-            if nxt is None:
+-                break
+-            mid, p, vc = nxt
+-            self.D.tick(p)
+-            self.store.remove(mid)
+-            self._delivered.append(mid)
+-            out.append(mid)
+-        return out
++        # WRONG: never actually delivers (drops every message) -> empty delivery order.
++        return []
+ 
+     def delivered_ids(self):
+         return list(self._delivered)

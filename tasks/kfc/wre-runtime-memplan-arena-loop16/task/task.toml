@@ -1,0 +1,56 @@
+# wre-runtime-memplan-arena — CPU-lane. PERFORMANCE (implement from an empty stub).
+# Offline/online arena memory planner (alloc/free stream -> per-block offsets). PERFORMANCE.
+
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wre-runtime-memplan-arena-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "submission/kernel.py ships a required function plan_arena whose body is not implemented (it raises NotImplementedError)."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/, environment/loop/, environment/runtime/ recovered from):
+#   <internal registry>/kernelbench/wre-runtime-memplan-arena-loop16:v1@sha256:147fdec840ff88c121ccaa52d76d14c992485fe1eb4f4c59c8d4ccf4a9fafa20
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wre-runtime-memplan-arena-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wre-runtime-memplan-arena-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 4
+memory_mb = 16384
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "performance"
+contract_pattern = "kernelbench_generic_v1"
+timing_metric = "speedup"
+primary_edit_paths = ["submission/kernel.py"]
+forbidden_edit_paths = ["*"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+reward_formula = "performance: reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0 — 0.5 at parity with the oracle, capped 1.0 at oracle^2; 0 if a hard gate fails or speedup <= 1. speedup here is the arena-size ratio (naive_arena/candidate_arena) = vs_oracle * ref_speedup. ref_speedup source unchanged (tests/ref_speedup.txt or the in-image manifest)."
+ref_speedup = 5.681818
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+[loop]
+# NOTE: the /opt/loop harness baked into the image applies its own 3/16 in-session budget; for in-session loop scoring the image is authoritative.
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+mode = "baked"
+feedback_surface = "/opt/loop/submit.sh"

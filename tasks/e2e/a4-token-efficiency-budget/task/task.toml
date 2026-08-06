@@ -1,0 +1,111 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "a4-token-efficiency-budget"
+bench = "e2e"
+kind = "performance"
+language = "python"
+title = "Train the best language model you can from a FIXED NUMBER OF TRAINING TOKENS"
+ext_id = "e2e-a4-token-efficiency-budget"
+difficulty = "hard"
+category = "ml_training"
+lane = "e2e_task"
+family = "A_training"
+author = "fai-bench"
+tags = [
+    "python",
+    "pytorch",
+    "nanogpt",
+    "language-model",
+    "training",
+    "sample-efficiency",
+    "token-budget",
+    "optimizer",
+    "muon",
+    "architecture",
+    "data-schedule",
+    "h20",
+    "e2e-optimization",
+]
+description = "A4 优化器算法 / sample efficiency. Train the best LM you can on ONE H20 from a FIXED NUMBER OF TRAINING TOKENS (not a wall-clock), scored on held-out WikiText-103 val_bpb. Because the budget is TOKENS, every throughput lever (fp8, torch.compile, batch tuning, a faster loader) is worth exactly zero -- the only way to a lower loss is real SAMPLE EFFICIENCY: the optimizer/update rule (Muon-style spectral updates), the architecture (RMSNorm/RoPE/QK-norm/ReLU^2/zero-init/logit-softcap), and the data schedule. The shipped starter is the BEST of a tuned-AdamW batch x LR sweep, so config-only tricks are already absorbed, and it is the bar: BOUNDED reward in [0,1] where matching the starter scores 0 and matching a strong reference recipe measured at the same token budget scores 0.5. A harness-re-counted parameter cap stops \"just scale the model up\". Whole nanoGPT repo editable except a small frozen eval surface."
+instruction = "instruction.md"
+
+[agent]
+# The solver iterates its recipe locally within its session; scoring runs the budgeted training
+# once per seed (single-shot).
+timeout_sec = 18000
+
+# 🔁 LOOP16: the shipped image is the loop16 overlay, so the "1 to 16 submissions" the
+# instruction promises is REAL. The loop16 image is `crane append` onto the base — purely
+# additive (/opt/loop + /app/instruction.md), NOTHING under /tests changed,
+# compute_reward.py/test.sh untouched, so the GRADED path is byte-identical to the
+# validated single-shot base (uid-65534 drop and all 24 validation checks inherited).
+# Single-shot fallback: :v3-deleak@sha256:28bbf1300c4cd9123faf5c66f4fa74c4347437f622d8094e0431c14121af3145
+# Open-source build: `cd task && docker build -f environment/Dockerfile -t fai/e2e-a4-token-efficiency-budget:oss .`
+# provenance (original internal image, not publicly pullable): <internal registry>/kernelbench/e2e-a4-token-efficiency-budget:v3-deleak-loop16@sha256:fac494d80d17046c78fa7ac4fa22e05a51ca0a7abb0e1df647279a253008a04c
+# ⚠️ The published scores for this task were produced with the LOOP16 protocol (16 rounds),
+#    so docker_image points at the loop16 form. Build it in two steps:
+#      docker build -f environment/Dockerfile        -t fai/e2e-a4-token-efficiency-budget:oss .
+#      docker build -f environment/Dockerfile.loop16 -t fai/e2e-a4-token-efficiency-budget:oss-loop16 .
+#    The single-shot form (:oss) is a valid alternative but is NOT the protocol the reported
+#    numbers used. The graded surface (/tests) is identical in both.
+[environment]
+docker_image = "fai/e2e-a4-token-efficiency-budget:oss-loop16"
+dockerfile = "environment/Dockerfile.loop16"
+dockerfile_single_shot = "environment/Dockerfile"
+build_timeout_sec = 2400
+cpus = 8
+memory_mb = 32768
+gpus = 1
+# H20 只是**锚点标定用卡**,不是硬性限制。换卡时:
+#   1) 按 tests/verifier-correctness-manifest.json 的 recalibrate_howto 重新标定锚点;
+#   2) 用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像(8.0 A100 / 8.9 L40S·4090 / 9.0 H100·H20 / 10.0 B200)。
+gpu_types = ["H20"]
+storage_mb = 30720
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+# test.sh runs the solver's recipe once per seed (3 seeds) under the TOKEN budget plus a 900 s
+# wall-clock feasibility guard, then reloads + evals each checkpoint. Worst case is
+# 3 x (900 + 60 grace) + 3 evals; the timeout must cover it.
+timeout_sec = 3600
+task_kind = "e2e_optimization"
+submission_root = "/app/submission"
+# The whole /app/repo (nanoGPT) + /app/submission is editable EXCEPT the frozen eval surface.
+forbidden_edit_paths = [
+    "tests/compute_reward.py",
+    "tests/test.sh",
+    "tests/holdout_corpus.txt",
+    "tests/verifier-correctness-manifest.json",
+    "/tests",
+]
+result_paths = [
+    "/logs/verifier/metrics.json",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+]
+
+[verifier.frozen]
+note = "v1 声明不出 primary_edit_paths:整个 repo 可编辑,被计分的交付物在 [verifier].submission_root 下;评分面靠 [verifier].forbidden_edit_paths + tests/test.sh 里的 sha256 门冻结。"
+
+[primary_metric]
+name = "reward"
+goal = "maximize"
+description = "BOUNDED [0,1] reward.md performance envelope: reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0 with speedup = baseline_bpb / median_val_bpb over the harness seed set, where baseline_bpb is the SHIPPED tuned-AdamW starter's calibrated held-out bpb and ref_speedup is a FROZEN authoring-time constant (baseline_bpb / oracle_val_bpb). 0 at or below the starter, 0.5 at the demonstrated in-budget ceiling, 1.0 only at speedup = ref_speedup**2. 0 on any hard-fail (token budget / param cap / anti-spoof / byte-identical weights across seeds / no checkpoint / frozen-surface tamper). NOTE: `speedup` is a QUALITY ratio (bits-per-byte at a fixed TRAINING-TOKEN budget), not a wall-clock ratio — nothing in this task is timed for score; the wall-clock is only a feasibility guard. The scorer never runs the oracle or the baseline: it reads two frozen constants."
+source = "/logs/verifier/metrics.json"
+ref_speedup = 1.204527530540146
+ref_speedup_source = "tests/verifier-correctness-manifest.json"
+calibrated_on = "NVIDIA H20"
+
+[loop]
+min_submissions = 1
+max_submissions = 16
+submit = "bash /opt/loop/submit.sh"

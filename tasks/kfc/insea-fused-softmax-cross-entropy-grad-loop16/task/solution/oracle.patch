@@ -1,0 +1,279 @@
+diff --git a/cross_entropy_grad.py b/cross_entropy_grad.py
+index ff781cc..429b935 100644
+--- a/cross_entropy_grad.py
++++ b/cross_entropy_grad.py
+@@ -42,16 +42,27 @@ Error contract
+   ``N``; if ``label_smoothing`` is negative; or if any non-ignored label lies
+   outside ``[0, V)``.
+ 
+-Note on the current implementation
+-----------------------------------
+-This straightforward implementation forms the full log-probability tensor, the
+-full probability tensor, and a full gradient tensor -- three ``(N, V)`` buffers
+-in addition to the input. It is correct but holds several full-size copies of
+-the logits at once, which is expensive at large ``V``.
++Implementation note
++-------------------
++A single fused kernel computes both the loss and the gradient. Each program
++handles one row: a first streaming pass performs an online softmax (running
++max, running sum of exponentials, sum of logits, target logit — O(1) state per
++row), and a second pass recomputes the probabilities block-by-block and writes
++the gradient in place into the ``logits`` buffer. The only extra device memory
++is an ``(N,)`` float32 buffer of per-row losses; no full-size ``(N, V)``
++intermediate is ever materialized.
+ """
+ 
+ import torch
+ 
++try:
++    import triton
++    import triton.language as tl
++
++    _HAS_TRITON = True
++except Exception:  # pragma: no cover - triton is expected to be available
++    _HAS_TRITON = False
++
+ 
+ def _validate(logits, labels, label_smoothing):
+     if not isinstance(logits, torch.Tensor) or not isinstance(labels, torch.Tensor):
+@@ -70,37 +81,211 @@ def _validate(logits, labels, label_smoothing):
+     return N, V
+ 
+ 
++if _HAS_TRITON:
++
++    @triton.jit
++    def _count_valid_bad_kernel(
++        lab_ptr,  # (N,) int32/int64
++        stats_ptr,  # (2,) int64: [n_valid, n_bad] accumulated with exact integer atomics
++        N,
++        V,
++        ignore_index,
++        BLOCK: tl.constexpr,
++    ):
++        pid = tl.program_id(0)
++        offs = pid * BLOCK + tl.arange(0, BLOCK)
++        mask = offs < N
++        lab = tl.load(lab_ptr + offs, mask=mask, other=ignore_index)
++        is_valid = (lab != ignore_index) & mask
++        is_bad = is_valid & ((lab < 0) | (lab >= V))
++        tl.atomic_add(stats_ptr, tl.sum(is_valid.to(tl.int64), axis=0))
++        tl.atomic_add(stats_ptr + 1, tl.sum(is_bad.to(tl.int64), axis=0))
++
++    @triton.jit
++    def _ce_loss_grad_reg_kernel(
++        x_ptr,  # (N, V) in: logits, out: gradient (overwritten in place)
++        lab_ptr,  # (N,) int32/int64
++        loss_ptr,  # (N,) float32 per-row loss, 0 for ignored rows
++        V,
++        ignore_index,
++        s,
++        inv_denom,
++        BLOCK_V: tl.constexpr,  # >= V: the whole row stays resident in registers
++    ):
++        row = tl.program_id(0)
++        base = x_ptr + row.to(tl.int64) * V
++        cols = tl.arange(0, BLOCK_V)
++        mask = cols < V
++        lab = tl.load(lab_ptr + row)
++
++        if lab == ignore_index:
++            tl.store(loss_ptr + row, 0.0)
++            z = tl.zeros([BLOCK_V], dtype=tl.float32)
++            tl.store(base + cols, z.to(x_ptr.dtype.element_ty), mask=mask)
++        else:
++            x = tl.load(base + cols, mask=mask, other=-float("inf")).to(tl.float32)
++            m = tl.max(x, axis=0)
++            e = tl.exp(x - m)
++            l = tl.sum(e, axis=0)
++            sum_x = tl.sum(tl.where(mask, x, 0.0), axis=0)
++            x_y = tl.sum(tl.where(cols == lab, x, 0.0), axis=0)
++            log_z = m + tl.log(l)
++            row_loss = (1.0 - s) * (log_z - x_y) + s * (log_z - sum_x / V)
++            tl.store(loss_ptr + row, row_loss * inv_denom)
++            g = e * (1.0 / l) - s / V
++            g = tl.where(cols == lab, g - (1.0 - s), g)
++            g = g * inv_denom
++            tl.store(base + cols, g.to(x_ptr.dtype.element_ty), mask=mask)
++
++    @triton.jit
++    def _ce_loss_grad_kernel(
++        x_ptr,  # (N, V) in: logits, out: gradient (overwritten in place)
++        lab_ptr,  # (N,) int32/int64
++        loss_ptr,  # (N,) float32 per-row loss, 0 for ignored rows
++        V,
++        ignore_index,
++        s,
++        inv_denom,
++        BLOCK_V: tl.constexpr,
++    ):
++        row = tl.program_id(0)
++        base = x_ptr + row.to(tl.int64) * V
++        cols0 = tl.arange(0, BLOCK_V)
++        lab = tl.load(lab_ptr + row)
++
++        if lab == ignore_index:
++            tl.store(loss_ptr + row, 0.0)
++            z = tl.zeros([BLOCK_V], dtype=tl.float32)
++            for off in range(0, V, BLOCK_V):
++                cols = off + cols0
++                mask = cols < V
++                tl.store(base + cols, z.to(x_ptr.dtype.element_ty), mask=mask)
++        else:
++            m = -float("inf")
++            l = 0.0
++            sum_x = 0.0
++            x_y = 0.0
++            for off in range(0, V, BLOCK_V):
++                cols = off + cols0
++                mask = cols < V
++                x = tl.load(base + cols, mask=mask, other=-float("inf")).to(tl.float32)
++                bmax = tl.max(x, axis=0)
++                new_m = tl.maximum(m, bmax)
++                l = l * tl.exp(m - new_m) + tl.sum(tl.exp(x - new_m), axis=0)
++                m = new_m
++                sum_x += tl.sum(tl.where(mask, x, 0.0), axis=0)
++                x_y += tl.sum(tl.where(cols == lab, x, 0.0), axis=0)
++
++            log_z = m + tl.log(l)
++            row_loss = (1.0 - s) * (log_z - x_y) + s * (log_z - sum_x / V)
++            tl.store(loss_ptr + row, row_loss * inv_denom)
++
++            inv_l = 1.0 / l
++            s_over_v = s / V
++            om_s = 1.0 - s
++            for off in range(0, V, BLOCK_V):
++                cols = off + cols0
++                mask = cols < V
++                x = tl.load(base + cols, mask=mask, other=0.0).to(tl.float32)
++                g = tl.exp(x - m) * inv_l - s_over_v
++                g = tl.where(cols == lab, g - om_s, g)
++                g = g * inv_denom
++                tl.store(base + cols, g.to(x_ptr.dtype.element_ty), mask=mask)
++
++
++def _chunked_fallback(logits, labels, valid, s, inv_denom, loss_buf):
++    """Memory-bounded pure-torch path (non-CUDA tensors or missing triton)."""
++    N, V = logits.shape
++    chunk = max(1, min(N, (1 << 22) // max(V, 1)))
++    for c0 in range(0, N, chunk):
++        c1 = min(N, c0 + chunk)
++        x = logits[c0:c1]
++        xf = x.to(torch.float32)
++        m = xf.max(dim=1, keepdim=True).values
++        e = torch.exp(xf - m)
++        l = e.sum(dim=1, keepdim=True)
++        log_z = m + torch.log(l)
++        lab = labels[c0:c1].clamp(min=0).long()
++        idx = torch.arange(c1 - c0, device=logits.device)
++        x_y = xf[idx, lab].unsqueeze(1)
++        sum_x = xf.sum(dim=1, keepdim=True)
++        row_loss = ((1.0 - s) * (log_z - x_y) + s * (log_z - sum_x / V)).squeeze(1)
++        v = valid[c0:c1]
++        loss_buf[c0:c1] = torch.where(v, row_loss * inv_denom, torch.zeros_like(row_loss))
++        g = e / l - (s / V)
++        g[idx, lab] = g[idx, lab] - (1.0 - s)
++        g = g * inv_denom
++        g = torch.where(v.unsqueeze(1), g, torch.zeros_like(g))
++        x.copy_(g.to(logits.dtype))
++    return logits
++
++
+ def cross_entropy_loss_grad(logits, labels, ignore_index=-100, label_smoothing=0.0):
+     """See module docstring for the full contract."""
+     N, V = _validate(logits, labels, label_smoothing)
+     s = float(label_smoothing)
+ 
+-    valid = labels != ignore_index
+-    # non-ignored labels must be inside [0, V)
+-    if valid.any():
+-        vlab = labels[valid]
+-        if int(vlab.max()) >= V or int(vlab.min()) < 0:
+-            raise ValueError(f"a non-ignored label is out of range [0, {V})")
+-    n_valid = int(valid.sum().item())
+-    denom = max(n_valid, 1)
+-
+-    safe = labels.clamp(min=0).long()                       # ignore rows point at col 0 (masked out later)
+-    idx = torch.arange(N, device=logits.device)
+-
+-    lf = logits.to(torch.float32)
+-    logp = torch.log_softmax(lf, dim=-1)                    # (N, V) full buffer
+-    logp_y = logp[idx, safe]                                # (N,)
+-    nll = -logp_y
+-    smooth = -logp.mean(dim=1)                              # -mean_k log p[k]
+-    row_loss = (1.0 - s) * nll + s * smooth
+-    row_loss = torch.where(valid, row_loss, torch.zeros_like(row_loss))
+-    loss = row_loss.sum() / denom
+-
+-    prob = logp.exp()                                       # (N, V) softmax
+-    grad = prob.clone()                                     # (N, V) gradient buffer
+-    if s != 0.0:
+-        grad = grad - (s / V)
+-    grad[idx, safe] = grad[idx, safe] - (1.0 - s)
+-    grad = grad / denom
+-    grad[~valid] = 0.0                                      # ignored rows -> exactly zero
+-    return loss, grad.to(logits.dtype)
++    if not labels.is_contiguous():
++        labels = labels.contiguous()
++
++    use_triton = _HAS_TRITON and logits.is_cuda
++    if use_triton:
++        stats = torch.zeros(2, device=logits.device, dtype=torch.int64)
++        if N > 0:
++            _count_valid_bad_kernel[(triton.cdiv(N, 4096),)](
++                labels, stats, N, V, int(ignore_index), BLOCK=4096, num_warps=4
++            )
++        n_valid, n_bad = (int(v) for v in stats.tolist())
++    else:
++        valid = labels != ignore_index
++        bad = ((labels < 0) | (labels >= V)) & valid
++        n_valid, n_bad = (int(v) for v in torch.stack([valid.sum(), bad.sum()]).tolist())
++    if n_bad:
++        raise ValueError(f"a non-ignored label is out of range [0, {V})")
++    denom = n_valid if n_valid > 0 else 1
++    inv_denom = 1.0 / denom
++
++    if not logits.is_contiguous():
++        logits = logits.contiguous()
++
++    loss_buf = torch.empty(N, device=logits.device, dtype=torch.float32)
++
++    if use_triton and N > 0:
++        if V <= 8192:
++            block_v = triton.next_power_of_2(V)
++            if block_v <= 512:
++                num_warps = 1
++            elif block_v <= 4096:
++                num_warps = 2
++            else:
++                num_warps = 4
++            _ce_loss_grad_reg_kernel[(N,)](
++                logits,
++                labels,
++                loss_buf,
++                V,
++                int(ignore_index),
++                s,
++                inv_denom,
++                BLOCK_V=block_v,
++                num_warps=num_warps,
++            )
++        else:
++            _ce_loss_grad_kernel[(N,)](
++                logits,
++                labels,
++                loss_buf,
++                V,
++                int(ignore_index),
++                s,
++                inv_denom,
++                BLOCK_V=2048,
++                num_warps=4,
++            )
++        grad = logits
++    else:
++        valid = labels != ignore_index
++        grad = _chunked_fallback(logits, labels, valid, s, inv_denom, loss_buf)
++
++    loss = loss_buf.sum(dtype=torch.float64).to(torch.float32)
++    return loss, grad

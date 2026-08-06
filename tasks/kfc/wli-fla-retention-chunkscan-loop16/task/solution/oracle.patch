@@ -1,0 +1,131 @@
+diff --git a/fla/ops/retention/chunk.py b/fla/ops/retention/chunk.py
+index da3303c..fb25fc6 100644
+--- a/fla/ops/retention/chunk.py
++++ b/fla/ops/retention/chunk.py
+@@ -5,51 +5,9 @@
+ # For a list of all contributors, visit:
+ #   https://github.com/fla-org/flash-linear-attention/graphs/contributors
+ 
+-# Multi-scale retention (RetNet) chunked linear-attention entry point.
+-#
+-# Public entry `chunk_retention(q, k, v, scale, initial_state,
+-# output_final_state, cu_seqlens) -> (o, final_state)`.
+-#
+-# Retention is a linear-attention operator with a FIXED, data-independent
+-# per-head exponential decay
+-#       gamma[h] = 1 - 2 ** (-5 - h)
+-# and the state recurrence
+-#       S_t = gamma[h] * S_{t-1} + k_t^T v_t
+-#       o_t = scale * (q_t @ S_t)
+-# equivalently the causal decay-weighted attention
+-#       o_t = scale * sum_{s<=t} gamma[h]^(t-s) (q_t . k_s) v_s .
+-
+ import torch
+ 
+-
+-def _retention_recurrent_bthk(q, k, v, scale, gamma, initial_state, output_final_state):
+-    # -----------------------------------------------------------------
+-    # SLOW-BUT-CORRECT forward: an idiomatic eager per-timestep gated
+-    # linear-attention recurrence written in plain torch. It is numerically
+-    # correct and preserves the public (o, final_state) contract of
+-    # chunk_retention, but evaluates the scan strictly one time step at a time
+-    # over the T positions -> O(T) sequential kernel launches with no
+-    # time-parallelism (no chunked/blocked reformulation). Making this fast is
+-    # the task.
+-    # -----------------------------------------------------------------
+-    B, T, H, K = q.shape
+-    V = v.shape[-1]
+-    qf = q.float()
+-    kf = k.float()
+-    vf = v.float()
+-    g = gamma.view(1, H, 1, 1).float()               # [1,H,1,1] per-head decay
+-    S = qf.new_zeros(B, H, K, V)
+-    if initial_state is not None:
+-        S = S + initial_state.float()
+-    o = qf.new_zeros(B, T, H, V)
+-    for t in range(T):
+-        kt = kf[:, t]                                # [B,H,K]
+-        vt = vf[:, t]                                # [B,H,V]
+-        qt = qf[:, t]                                # [B,H,K]
+-        S = g * S + kt.unsqueeze(-1) * vt.unsqueeze(-2)   # [B,H,K,V]
+-        o[:, t] = scale * torch.einsum('bhk,bhkv->bhv', qt, S)
+-    final_state = S if output_final_state else None
+-    return o.to(q.dtype), final_state
++from fla.ops.simple_gla.chunk import chunk_simple_gla
+ 
+ 
+ @torch.compiler.disable
+@@ -57,12 +15,12 @@ def chunk_retention(
+     q: torch.Tensor,
+     k: torch.Tensor,
+     v: torch.Tensor,
+-    scale: float = None,
+-    initial_state: torch.Tensor = None,
++    scale: float | None = None,
++    initial_state: torch.Tensor | None = None,
+     output_final_state: bool = False,
+-    cu_seqlens=None,
++    cu_seqlens: torch.LongTensor | None = None,
+     **kwargs,
+-):
++) -> tuple[torch.Tensor, torch.Tensor]:
+     r"""
+     Args:
+         q (torch.Tensor):
+@@ -89,20 +47,12 @@ def chunk_retention(
+             Outputs of shape `[B, T, H, V]`.
+         final_state (torch.Tensor):
+             Final state of shape `[N, H, K, V]` if `output_final_state=True` else `None`.
++
+     """
+     if 'head_first' in kwargs:
+         raise DeprecationWarning(
+             "head_first has been removed. Inputs must be in `[B, T, H, ...]` format.",
+         )
+-    kwargs.pop('chunk_size', None)
+-    if scale is None:
+-        scale = q.shape[-1] ** -0.5
+-    H = q.shape[2]
+-    gamma = 1 - torch.pow(
+-        torch.tensor(2.0, dtype=torch.float, device=q.device),
+-        -5.0 - torch.arange(H, dtype=torch.float, device=q.device),
+-    )                                                # [H] fixed per-head decay
+-
+     if cu_seqlens is not None:
+         if q.shape[0] != 1:
+             raise ValueError(
+@@ -114,22 +64,15 @@ def chunk_retention(
+                 f"The number of initial states is expected to be equal to the number of input sequences, "
+                 f"i.e., {len(cu_seqlens) - 1} rather than {initial_state.shape[0]}.",
+             )
+-        # honest slow varlen path: process each sequence segment independently,
+-        # each with its own initial state and its own final state.
+-        bounds = cu_seqlens.tolist()
+-        outs = []
+-        finals = []
+-        for i in range(len(bounds) - 1):
+-            s, e = bounds[i], bounds[i + 1]
+-            init_i = None if initial_state is None else initial_state[i:i + 1]
+-            o_i, fs_i = _retention_recurrent_bthk(
+-                q[:, s:e], k[:, s:e], v[:, s:e], scale, gamma, init_i, output_final_state,
+-            )
+-            outs.append(o_i)
+-            if output_final_state:
+-                finals.append(fs_i)
+-        o = torch.cat(outs, dim=1)
+-        final_state = torch.cat(finals, dim=0) if output_final_state else None
+-        return o, final_state
+-
+-    return _retention_recurrent_bthk(q, k, v, scale, gamma, initial_state, output_final_state)
++    g_gamma = (1 - q.new_tensor(2., dtype=torch.float).pow(-5. - q.new_tensor(range(q.shape[2]), dtype=torch.float))).log()
++    o, final_state = chunk_simple_gla(
++        q=q,
++        k=k,
++        v=v,
++        scale=scale,
++        g_gamma=g_gamma,
++        initial_state=initial_state,
++        output_final_state=output_final_state,
++        cu_seqlens=cu_seqlens,
++    )
++    return o, final_state

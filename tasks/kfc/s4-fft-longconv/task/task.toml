@@ -1,0 +1,53 @@
+# Reconstructed: the source package shipped a 0-byte task.toml;
+# the values below mirror the task metadata.
+
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "s4-fft-longconv"
+bench = "kfc"
+kind = "implementation"
+language = "python"
+title = "submission/kernel.py ships a required function causal_conv whose body is not implemented (it raises NotImplementedError)."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wre-arch-s4-fft-longconv:v1@sha256:4215533296f1f970d093257f96b14d5cada8925b220966c41471b23d78c36542
+# 🔁 LOOP16: the shipped image is the loop16 overlay (`crane append` onto the :oss base, purely
+#    additive — /opt/loop only, NOTHING under tests/ changed). Build it in two steps:
+#      docker build -f environment/Dockerfile             -t fai/kfc-s4-fft-longconv:oss .
+#      docker build -f environment/loop_overlay/Dockerfile -t fai/kfc-s4-fft-longconv:oss-loop16 environment/loop_overlay
+#    The single-shot form (:oss) is a valid alternative; the graded surface (tests/) is identical in both.
+[environment]
+docker_image = "fai/kfc-s4-fft-longconv:oss"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 1
+# H20 只是**锚点标定用卡**,不是硬性限制。换卡时:①按 tests/ref_speedup.caveat.md 重标锚点;
+#   ②用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像。
+gpu_types = ["H20"]
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+primary_edit_paths = ["submission/kernel.py"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "reward"
+goal = "maximize"
+calibrated_on = "NVIDIA H20"
+
+# loop16: the shipped image bakes /opt/loop; the in-session dev proxy re-runs THIS task's own
+# verifier (candidate mode) on the live /app/repo. This is an IMPLEMENTATION-class task (binary
+# reward), so best-of-k ranks on the dual-emitted RAW vs_oracle speed signal to prefer the fastest
+# correctness-passing kernel. At most 16 submissions, at least 1; the model decides when to stop
+# (min=1 so --finalize works any time). NO calibrated anchor is baked. The graded score is the
+# runner's fresh end-of-session tests/ grade (binary correctness over hidden shapes).

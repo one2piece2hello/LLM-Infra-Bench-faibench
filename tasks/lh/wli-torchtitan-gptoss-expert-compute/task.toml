@@ -1,0 +1,41 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wli-torchtitan-gptoss-expert-compute"
+bench = "lh"
+kind = "implementation"
+language = "python"
+title = "Fix torchtitan's gpt-oss MoE expert compute (routing counts + grouped SwiGLU experts)"
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wli-torchtitan-gptoss-expert-compute:sa3fix3@sha256:22e76f3b11b9505652ace09b8ec38c06e19e58ed7c877389c9f7bcc0a5574c2f
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/lh-torchtitan-gptoss-expert-compute:oss .`
+# provenance (original internal image, not publicly pullable): <internal registry>/kernelbench/wli-torchtitan-gptoss-expert-compute:sa3fix3@sha256:22e76f3b11b9505652ace09b8ec38c06e19e58ed7c877389c9f7bcc0a5574c2f
+[environment]
+docker_image = "fai/lh-torchtitan-gptoss-expert-compute:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 16384
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "correctness"
+contract_pattern = "kernelbench_generic_v1"
+primary_edit_paths = ["torchtitan/models/common/moe.py", "torchtitan/models/gpt_oss/moe.py"]
+forbidden_edit_paths = ["*"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "graded_correctness"
+goal = "maximize"
+calibrated_on = "Intel Sapphire Rapids CPU lane"

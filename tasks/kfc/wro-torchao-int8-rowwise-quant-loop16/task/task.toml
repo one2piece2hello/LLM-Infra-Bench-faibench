@@ -1,0 +1,57 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wro-torchao-int8-rowwise-quant-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "You are given a working implementation of a rowwise int8 quantization primitive — the routine that …"
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wro-torchao-int8-rowwise-quant-loop16:v1@sha256:eca5c38506261492ca01d356568c2f08c14d61cab27381ebed22e998bf55a7e2
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wro-torchao-int8-rowwise-quant-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wro-torchao-int8-rowwise-quant-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 49152
+gpus = 1
+# H20 只是**锚点标定用卡**,不是硬性限制。换卡时:①按 tests/ref_speedup.caveat.md 重标锚点;
+#   ②用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像。
+gpu_types = ["H20"]
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "acceleration"
+contract_pattern = "repo_scope_speedup"
+timing_metric = "speedup"
+primary_edit_paths = ["torchao/prototype/quantized_training/int8.py"]
+forbidden_edit_paths = ["**"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+reward_formula = "min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0"
+reward_note = "reward = 0 on any hard gate, on speedup<=1, or on ref_speedup<=1; range [0,1]"
+reward_reference = "/opt/verifier-correctness-manifest.json ref_speedup, fallback tests/ref_speedup.txt (oracle speedup over the frozen degraded baseline)"
+ref_speedup = 902.116643
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "NVIDIA H20"
+
+[loop]
+# NOTE: the /opt/loop harness baked into the image applies its own 3/16 in-session budget; for in-session loop scoring the image is authoritative.
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+feedback_surface = "/opt/loop/submit.sh"
+declared_submission_policy = "single_submission"   # submit == finalize; the 2nd call is refused

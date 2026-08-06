@@ -1,0 +1,128 @@
+diff --git a/sgemm_kernel.cu b/sgemm_kernel.cu
+index 1586c25..50dd138 100644
+--- a/sgemm_kernel.cu
++++ b/sgemm_kernel.cu
+@@ -1,52 +1,55 @@
+-// sgemm_kernel.cu — single-precision matrix-multiply kernel (THIS FILE is the one
+-// you edit).
++// REVIEWER-ONLY baseline2 materializer — NOT baked. Applied in oracle mode
++// via a distinct --baseline2-patch; must earn its OWN positive reward, proving the
++// verifier is not oracle-code-matching (a correct SGEMM that is NOT the register-
++// tiled oracle still scores > 0).
++// To materialize: copy into /app/repo/sgemm_kernel.cu, then
++//   git -C /app/repo diff > baseline2.patch
+ //
+-// Computes D[M,N] = alpha * (A[M,K] @ B[K,N]) + beta * C[M,N] with float32 inputs,
+-// float32 accumulation and a float32 result. It is invoked from the fixed Python
+-// wrapper sgemm.py, which validates the contract and JIT-compiles this translation
+-// unit with nvcc. The input C is read (for the beta term) but not modified; the
+-// result is written to a fresh output buffer.
+-//
+-// ---------------------------------------------------------------------------
+-// FROZEN BASELINE (candidate start state): the most direct possible kernel — ONE
+-// GPU thread per output element. Each thread walks the full length-K inner
+-// dimension, re-reading one row of A and one column of B straight from global
+-// memory, and never shares or reuses any value with its neighbours. It is CORRECT
+-// for arbitrary M, N, K (including sizes that are not multiples of any tile, K=1,
+-// and large K) but it re-reads the same operands from global memory over and over,
+-// so the device spends almost all of its time moving data rather than computing.
+-// Make it FASTER on the GPU while keeping the result within the verifier's
+-// tolerance of a high-precision reference. You may use any GPU technique available
+-// in the image; keep the accumulation in float32.
+-//
+-// Forbidden: do NOT delegate the multiply to a prebuilt vendor matrix-multiply
+-// library or a framework matrix-multiply primitive — implement the multiply
+-// yourself. The exact banned symbols are listed in the task instructions; the
+-// scoring harness scans THIS file for them and scores the task 0 on a hit, so do
+-// not name them here even in comments.
+-// ---------------------------------------------------------------------------
++// DISTINCT mechanism: shared-memory tiling ONLY — one output element per thread,
++// no register sub-tile. A BT x BT block stages BT x BT tiles of A and B into shared
++// memory and each thread accumulates a SINGLE output over the K strips. This reuses
++// each loaded operand BT times (a real improvement over the naive one-thread-per-
++// output baseline that re-reads from global memory), but far less arithmetic
++// intensity than the oracle's TM x TN register tile -> correct and faster than the
++// baseline, yet well below the oracle. float32 accumulate; edges guarded so
++// arbitrary M, N, K are correct. Validated on H20.
+ #include <torch/extension.h>
+ #include <ATen/cuda/CUDAContext.h>
+ #include <c10/cuda/CUDAGuard.h>
+ #include <cuda_runtime.h>
+ 
+-#ifndef KB_BLOCK
+-#define KB_BLOCK 16
++#ifndef BT
++#define BT 32
+ #endif
+ 
+-__global__ void sgemm_naive_kernel(const float* __restrict__ A,
+-                                   const float* __restrict__ B,
+-                                   const float* __restrict__ C,
+-                                   float* __restrict__ D,
+-                                   int M, int N, int K,
+-                                   float alpha, float beta) {
+-    const int row = blockIdx.y * blockDim.y + threadIdx.y;
+-    const int col = blockIdx.x * blockDim.x + threadIdx.x;
+-    if (row < M && col < N) {
+-        float acc = 0.0f;
+-        for (int k = 0; k < K; ++k) {
+-            acc += A[row * K + k] * B[k * N + col];   // float32 accumulate
++__global__ void sgemm_smem_tiled_kernel(const float* __restrict__ A,
++                                        const float* __restrict__ B,
++                                        const float* __restrict__ C,
++                                        float* __restrict__ D,
++                                        int M, int N, int K,
++                                        float alpha, float beta) {
++    __shared__ float As[BT][BT];
++    __shared__ float Bs[BT][BT];
++    const int ty = threadIdx.y;
++    const int tx = threadIdx.x;
++    const int row = blockIdx.y * BT + ty;
++    const int col = blockIdx.x * BT + tx;
++
++    float acc = 0.0f;
++    const int ntiles = (K + BT - 1) / BT;
++    for (int t = 0; t < ntiles; ++t) {
++        const int aCol = t * BT + tx;
++        const int bRow = t * BT + ty;
++        As[ty][tx] = (row < M && aCol < K) ? A[row * K + aCol] : 0.0f;
++        Bs[ty][tx] = (bRow < K && col < N) ? B[bRow * N + col] : 0.0f;
++        __syncthreads();
++#pragma unroll
++        for (int k = 0; k < BT; ++k) {
++            acc += As[ty][k] * Bs[k][tx];   // float32 accumulate
+         }
++        __syncthreads();
++    }
++    if (row < M && col < N) {
+         const int idx = row * N + col;
+         D[idx] = alpha * acc + beta * C[idx];
+     }
+@@ -54,7 +57,6 @@ __global__ void sgemm_naive_kernel(const float* __restrict__ A,
+ 
+ torch::Tensor sgemm(torch::Tensor A, torch::Tensor B, torch::Tensor C,
+                     double alpha, double beta) {
+-    // A: (M,K), B: (K,N), C: (M,N) — all float32, CUDA, contiguous (checked in sgemm.py).
+     const int M = static_cast<int>(A.size(0));
+     const int K = static_cast<int>(A.size(1));
+     const int N = static_cast<int>(B.size(1));
+@@ -64,9 +66,9 @@ torch::Tensor sgemm(torch::Tensor A, torch::Tensor B, torch::Tensor C,
+     }
+     const c10::cuda::OptionalCUDAGuard device_guard(A.device());
+     auto stream = at::cuda::getCurrentCUDAStream();
+-    const dim3 block(KB_BLOCK, KB_BLOCK);
+-    const dim3 grid((N + KB_BLOCK - 1) / KB_BLOCK, (M + KB_BLOCK - 1) / KB_BLOCK);
+-    sgemm_naive_kernel<<<grid, block, 0, stream>>>(
++    const dim3 block(BT, BT);
++    const dim3 grid((N + BT - 1) / BT, (M + BT - 1) / BT);
++    sgemm_smem_tiled_kernel<<<grid, block, 0, stream>>>(
+         A.data_ptr<float>(),
+         B.data_ptr<float>(),
+         C.data_ptr<float>(),
+@@ -78,5 +80,5 @@ torch::Tensor sgemm(torch::Tensor A, torch::Tensor B, torch::Tensor C,
+ 
+ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+     m.def("sgemm", &sgemm,
+-          "fp32 GEMM D = alpha*(A@B) + beta*C (frozen naive one-thread-per-output baseline; float32 accumulate)");
++          "fp32 GEMM D=alpha*(A@B)+beta*C (baseline2: shared-memory tiling only, one output per thread)");
+ }

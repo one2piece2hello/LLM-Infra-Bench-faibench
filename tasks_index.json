@@ -1,0 +1,2218 @@
+{
+  "schema": "fai_bench_task_index_v3",
+  "task_count": 85,
+  "by_bench": {
+    "kfc": 55,
+    "lh": 20,
+    "e2e": 10
+  },
+  "gpu": 43,
+  "cpu": 42,
+  "gpus_undeclared": 0,
+  "with_anchor": 77,
+  "with_oracle": 83,
+  "with_primary_edit_paths": 63,
+  "vendored_repo": 75,
+  "with_loop16": 76,
+  "extra_dockerfiles": 1,
+  "tasks": [
+    {
+      "bench": "kfc",
+      "task": "arch-tiling-dram-traffic-min",
+      "package_root": "tasks/kfc/arch-tiling-dram-traffic-min/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/tile_planner.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 63.46,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "chunked-mlp-recompute",
+      "package_root": "tasks/kfc/chunked-mlp-recompute/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "submission/kernel.py"
+      ],
+      "task_kind": "correctness",
+      "perf_metric": "peak_bytes",
+      "ref_speedup": null,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/kernel_oracle.py"
+      ],
+      "vendored_repo": true,
+      "has_loop16": false,
+      "loop_harness": null,
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "implementation"
+    },
+    {
+      "bench": "kfc",
+      "task": "ckpt-dcp-meta-bbox-merge",
+      "package_root": "tasks/kfc/ckpt-dcp-meta-bbox-merge/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "submission/kernel.py"
+      ],
+      "task_kind": "performance",
+      "perf_metric": "speedup",
+      "ref_speedup": 41666.666667,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/kernel_oracle.py"
+      ],
+      "vendored_repo": true,
+      "has_loop16": false,
+      "loop_harness": null,
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "compile-cache-key-canonicalize",
+      "package_root": "tasks/kfc/compile-cache-key-canonicalize/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/identity_key.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 4.0,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "errorfeedback-sign-compress",
+      "package_root": "tasks/kfc/errorfeedback-sign-compress/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/grad_compress.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 31.7519,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "flash-online-softmax-prefill",
+      "package_root": "tasks/kfc/flash-online-softmax-prefill/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/causal_attention.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 6.0,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "fp16-tensorcore-mma-gemm",
+      "package_root": "tasks/kfc/fp16-tensorcore-mma-gemm/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/gemm_kernel.cu"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 2.0,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "fusion-dag-normalization-idiom-collapse",
+      "package_root": "tasks/kfc/fusion-dag-normalization-idiom-collapse/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/dag_fusion.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 11.29167,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "insea-coalesced-vectorized-transpose-loop16",
+      "package_root": "tasks/kfc/insea-coalesced-vectorized-transpose-loop16/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/transpose_kernel.cu"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 3.16,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "insea-contiguous-mem-pool-defrag-coalesce-loop16",
+      "package_root": "tasks/kfc/insea-contiguous-mem-pool-defrag-coalesce-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/mem_pool.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 3.01623,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "insea-cpu-int4xint8-quantized-dot-loop16",
+      "package_root": "tasks/kfc/insea-cpu-int4xint8-quantized-dot-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/blocked_dot.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 1.25313,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "insea-dsl-index-symbolic-simplifier-loop16",
+      "package_root": "tasks/kfc/insea-dsl-index-symbolic-simplifier-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/index_expr_simplify.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 3.36,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "insea-fused-softmax-cross-entropy-grad-loop16",
+      "package_root": "tasks/kfc/insea-fused-softmax-cross-entropy-grad-loop16/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/cross_entropy_grad.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 7.4157,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "insea-h2d-prefetch-compute-overlap-loop16",
+      "package_root": "tasks/kfc/insea-h2d-prefetch-compute-overlap-loop16/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/streamed_apply.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 1.4856,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "jit-source-arch-cache-key",
+      "package_root": "tasks/kfc/jit-source-arch-cache-key/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/identity_key.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 4.0,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "lowrank-adapter-apply",
+      "package_root": "tasks/kfc/lowrank-adapter-apply/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/lowrank_adapter_apply.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 1.1626,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "mamba-zoh-discretize",
+      "package_root": "tasks/kfc/mamba-zoh-discretize/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "submission/kernel.py"
+      ],
+      "task_kind": "correctness",
+      "perf_metric": null,
+      "ref_speedup": null,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/kernel_oracle.py"
+      ],
+      "vendored_repo": true,
+      "has_loop16": false,
+      "loop_harness": null,
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "implementation"
+    },
+    {
+      "bench": "kfc",
+      "task": "merge-attn-states-combine",
+      "package_root": "tasks/kfc/merge-attn-states-combine/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/combine_attn_states.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 6.4424,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "nativehist-merge",
+      "package_root": "tasks/kfc/nativehist-merge/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/native_histogram_merge.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 2.58717,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "s4-fft-longconv",
+      "package_root": "tasks/kfc/s4-fft-longconv/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": null,
+      "perf_metric": null,
+      "ref_speedup": null,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/kernel_oracle.py"
+      ],
+      "vendored_repo": true,
+      "has_loop16": false,
+      "loop_harness": null,
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "implementation"
+    },
+    {
+      "bench": "kfc",
+      "task": "sgemm-register-blocktiling",
+      "package_root": "tasks/kfc/sgemm-register-blocktiling/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/sgemm_kernel.cu"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 2.99,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "size-binned-caching-allocator",
+      "package_root": "tasks/kfc/size-binned-caching-allocator/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/caching_allocator.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 25.48631,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "splitk-tall-skinny-gemm",
+      "package_root": "tasks/kfc/splitk-tall-skinny-gemm/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/gemm_kernel.cu"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 5.69,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "ssm-causal-depthwise-conv1d",
+      "package_root": "tasks/kfc/ssm-causal-depthwise-conv1d/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/channel_window_op.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 18.5413,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "ssm-gla-chunk-recurrence",
+      "package_root": "tasks/kfc/ssm-gla-chunk-recurrence/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/gated_state_recurrence.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 62.2504,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "ssm-selective-scan-firstorder",
+      "package_root": "tasks/kfc/ssm-selective-scan-firstorder/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "/app/repo/state_space_scan.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 103.1823,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wli-fla-retention-chunkscan-loop16",
+      "package_root": "tasks/kfc/wli-fla-retention-chunkscan-loop16/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "fla/ops/retention/chunk.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 510.24,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wre-cloud-catalog-cost-select-loop16",
+      "package_root": "tasks/kfc/wre-cloud-catalog-cost-select-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": "speedup",
+      "perf_metric": null,
+      "ref_speedup": 5.959689,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wre-diloco-comm-chunk-balance-loop16",
+      "package_root": "tasks/kfc/wre-diloco-comm-chunk-balance-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "submission/kernel.py"
+      ],
+      "task_kind": "performance",
+      "perf_metric": "speedup",
+      "ref_speedup": 1.66973,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/kernel_oracle.py"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wre-kvoffload-lfu-admit-sketch-loop16",
+      "package_root": "tasks/kfc/wre-kvoffload-lfu-admit-sketch-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "submission/kernel.py"
+      ],
+      "task_kind": "performance",
+      "perf_metric": "speedup",
+      "ref_speedup": 12.423595,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/kernel_oracle.py"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wre-modelload-mmap-multi-route-loop16",
+      "package_root": "tasks/kfc/wre-modelload-mmap-multi-route-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "submission/kernel.py"
+      ],
+      "task_kind": "performance",
+      "perf_metric": "speedup",
+      "ref_speedup": 12195.12195,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/kernel_oracle.py"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wre-parallel-all2all-redistribute-loop16",
+      "package_root": "tasks/kfc/wre-parallel-all2all-redistribute-loop16/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": null,
+      "perf_metric": "speedup",
+      "ref_speedup": 1428.571429,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/kernel_oracle.py"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wre-router-power-of-two-choices-loop16",
+      "package_root": "tasks/kfc/wre-router-power-of-two-choices-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "submission/kernel.py"
+      ],
+      "task_kind": "performance",
+      "perf_metric": "speedup",
+      "ref_speedup": 2.935892,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/kernel_oracle.py"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wre-runtime-memplan-arena-loop16",
+      "package_root": "tasks/kfc/wre-runtime-memplan-arena-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "submission/kernel.py"
+      ],
+      "task_kind": "performance",
+      "perf_metric": "speedup",
+      "ref_speedup": 5.681818,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/kernel_oracle.py"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wre-sched-fair-vtc-roundrobin-loop16",
+      "package_root": "tasks/kfc/wre-sched-fair-vtc-roundrobin-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "submission/kernel.py"
+      ],
+      "task_kind": "performance",
+      "perf_metric": "speedup",
+      "ref_speedup": 43.0923,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/kernel_oracle.py"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wre-spec-accept-slot-compact-loop16",
+      "package_root": "tasks/kfc/wre-spec-accept-slot-compact-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": null,
+      "perf_metric": null,
+      "ref_speedup": 4.896368,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wre-stability-fused-gradclip-loop16",
+      "package_root": "tasks/kfc/wre-stability-fused-gradclip-loop16/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "submission/kernel.py"
+      ],
+      "task_kind": "performance",
+      "perf_metric": "speedup",
+      "ref_speedup": 8.207081,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/kernel_oracle.py"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wre-tp-allreduce-bias-fuse-loop16",
+      "package_root": "tasks/kfc/wre-tp-allreduce-bias-fuse-loop16/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": null,
+      "perf_metric": "speedup",
+      "ref_speedup": 7.8501,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/kernel_oracle.py"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wre-verl-grpo-advantage-loop16",
+      "package_root": "tasks/kfc/wre-verl-grpo-advantage-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "workspace/submission/advantage_estimators.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": null,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "tests/oracle_advantage.py"
+      ],
+      "vendored_repo": true,
+      "has_loop16": false,
+      "loop_harness": null,
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "implementation"
+    },
+    {
+      "bench": "kfc",
+      "task": "wro-brpc-rdma-blockpool-window-loop16",
+      "package_root": "tasks/kfc/wro-brpc-rdma-blockpool-window-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": null,
+      "perf_metric": null,
+      "ref_speedup": 3.767532,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wro-colossalai-devicemesh-rank-collate-loop16",
+      "package_root": "tasks/kfc/wro-colossalai-devicemesh-rank-collate-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "colossalai/device/device_mesh.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 7.005358,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wro-deepspeed-curriculum-cluster-select-loop16",
+      "package_root": "tasks/kfc/wro-deepspeed-curriculum-cluster-select-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": null,
+      "perf_metric": "speedup",
+      "ref_speedup": 20.777027,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wro-gbench-bigo-least-squares-loop16",
+      "package_root": "tasks/kfc/wro-gbench-bigo-least-squares-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": "speedup",
+      "perf_metric": null,
+      "ref_speedup": 55.610556,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wro-gbench-counter-finalize-loop16",
+      "package_root": "tasks/kfc/wro-gbench-counter-finalize-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": null,
+      "perf_metric": null,
+      "ref_speedup": 15.127159,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wro-megatron-moe-routing-fused-triton-loop16",
+      "package_root": "tasks/kfc/wro-megatron-moe-routing-fused-triton-loop16/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "megatron/core/fusions/fused_pad_routing_map.py",
+        "megatron/core/fusions/fused_indices_converter.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 5.902762,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wro-megatron-moe-routing-map-pad-loop16",
+      "package_root": "tasks/kfc/wro-megatron-moe-routing-map-pad-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "megatron/core/transformer/moe/moe_utils.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 479.507333,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wro-nccl-ib-multisend-wr-plan-loop16",
+      "package_root": "tasks/kfc/wro-nccl-ib-multisend-wr-plan-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": null,
+      "perf_metric": null,
+      "ref_speedup": 4.909378,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wro-offload-layer-prefetch-ring-pipeline-loop16",
+      "package_root": "tasks/kfc/wro-offload-layer-prefetch-ring-pipeline-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": "speedup",
+      "perf_metric": null,
+      "ref_speedup": 32.230499,
+      "has_oracle": false,
+      "oracle_artifacts": [],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wro-offload-policy-grid-search-loop16",
+      "package_root": "tasks/kfc/wro-offload-policy-grid-search-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": null,
+      "perf_metric": null,
+      "ref_speedup": 56.516589,
+      "has_oracle": false,
+      "oracle_artifacts": [],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wro-outlines-guide-transition-batch-loop16",
+      "package_root": "tasks/kfc/wro-outlines-guide-transition-batch-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": null,
+      "perf_metric": null,
+      "ref_speedup": 136.988316,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wro-sbert-paraphrase-mining-loop16",
+      "package_root": "tasks/kfc/wro-sbert-paraphrase-mining-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": null,
+      "perf_metric": "paraphrase_mining_speedup",
+      "ref_speedup": 45.338376,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wro-torchao-int8-rowwise-quant-loop16",
+      "package_root": "tasks/kfc/wro-torchao-int8-rowwise-quant-loop16/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "torchao/prototype/quantized_training/int8.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": "speedup",
+      "ref_speedup": 902.116643,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wro-torchtitan-varlen-cu-seqlens-loop16",
+      "package_root": "tasks/kfc/wro-torchtitan-varlen-cu-seqlens-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": null,
+      "perf_metric": "speedup",
+      "ref_speedup": 2.806253,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wro-tvm-winograd-conv2d-transform-loop16",
+      "package_root": "tasks/kfc/wro-tvm-winograd-conv2d-transform-loop16/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": null,
+      "perf_metric": null,
+      "ref_speedup": 891.920536,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "kfc",
+      "task": "wro-yogi-foreach-fused-loop16",
+      "package_root": "tasks/kfc/wro-yogi-foreach-fused-loop16/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "torch_optimizer/yogi.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 5.291184,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "lh",
+      "task": "wli-fla-kkt-solvetril-build",
+      "package_root": "tasks/lh/wli-fla-kkt-solvetril-build",
+      "layout": "flat",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "fla/ops/common/chunk_scaled_dot_kkt.py",
+        "fla/ops/utils/solve_tril.py"
+      ],
+      "task_kind": "correctness",
+      "perf_metric": null,
+      "ref_speedup": null,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": false,
+      "loop_harness": null,
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "implementation"
+    },
+    {
+      "bench": "lh",
+      "task": "wli-torchtitan-gptoss-expert-compute",
+      "package_root": "tasks/lh/wli-torchtitan-gptoss-expert-compute",
+      "layout": "flat",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "torchtitan/models/common/moe.py",
+        "torchtitan/models/gpt_oss/moe.py"
+      ],
+      "task_kind": "correctness",
+      "perf_metric": null,
+      "ref_speedup": null,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": false,
+      "loop_harness": null,
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "implementation"
+    },
+    {
+      "bench": "lh",
+      "task": "wro-blocksparse-gemm-sol",
+      "package_root": "tasks/lh/wro-blocksparse-gemm-sol",
+      "layout": "flat",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "blocksp/matmul.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 26.560385,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "lh",
+      "task": "wro-causal-delivery-vclock-coupled",
+      "package_root": "tasks/lh/wro-causal-delivery-vclock-coupled",
+      "layout": "flat",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "causal/buffer.py",
+        "causal/channel.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 187.500717,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "lh",
+      "task": "wro-fla-abc-chunkscan-sol",
+      "package_root": "tasks/lh/wro-fla-abc-chunkscan-sol",
+      "layout": "flat",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "fla/ops/abc/chunk.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 578.380265,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "lh",
+      "task": "wro-fla-gated-delta-chunkscan-sol",
+      "package_root": "tasks/lh/wro-fla-gated-delta-chunkscan-sol",
+      "layout": "flat",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "fla/ops/gated_delta_rule/chunk.py",
+        "fla/ops/gated_delta_rule/chunk_fwd.py",
+        "fla/ops/gated_delta_rule/gate.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 822.619615,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "lh",
+      "task": "wro-fla-nsa-sparse-sol",
+      "package_root": "tasks/lh/wro-fla-nsa-sparse-sol",
+      "layout": "flat",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "fla/ops/nsa/parallel.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 1036.420558,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "lh",
+      "task": "wro-fla-ttt-chunkscan-sol",
+      "package_root": "tasks/lh/wro-fla-ttt-chunkscan-sol",
+      "layout": "flat",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "fla/ops/ttt/chunk.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 63.173556,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "lh",
+      "task": "wro-fla-wallattn-flash-sol",
+      "package_root": "tasks/lh/wro-fla-wallattn-flash-sol",
+      "layout": "flat",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "fla/ops/wall_attn/parallel.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 308.863663,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "lh",
+      "task": "wro-flashattn-cute-blocksparse",
+      "package_root": "tasks/lh/wro-flashattn-cute-blocksparse",
+      "layout": "flat",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "flash_attn/cute/interface.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 189.21,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "lh",
+      "task": "wro-flashattn-cute-blocksparse-bwd",
+      "package_root": "tasks/lh/wro-flashattn-cute-blocksparse-bwd",
+      "layout": "flat",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "flash_attn/cute/interface.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 49.008492,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "lh",
+      "task": "wro-flashattn-cute-scoremod-tanh",
+      "package_root": "tasks/lh/wro-flashattn-cute-scoremod-tanh",
+      "layout": "flat",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "flash_attn/cute/interface.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 31.37,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "lh",
+      "task": "wro-llamacpp-simd-q5k",
+      "package_root": "tasks/lh/wro-llamacpp-simd-q5k",
+      "layout": "flat",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "ggml/src/ggml-cpu/arch/x86/quants.c"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": "speedup",
+      "ref_speedup": 11.53,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "tests/oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "lh",
+      "task": "wro-lora-punica-fused",
+      "package_root": "tasks/lh/wro-lora-punica-fused",
+      "layout": "flat",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "vllm/lora/ops/triton_ops/kernel_utils.py",
+        "vllm/lora/ops/triton_ops/lora_shrink_op.py",
+        "vllm/lora/ops/triton_ops/lora_expand_op.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 16.59,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "lh",
+      "task": "wro-memory-accounting-sim-coupled",
+      "package_root": "tasks/lh/wro-memory-accounting-sim-coupled",
+      "layout": "flat",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "memsim/accountant.py",
+        "memsim/scheduler.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 1344.398352,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "lh",
+      "task": "wro-secure-agg-shamir-committee-coupled",
+      "package_root": "tasks/lh/wro-secure-agg-shamir-committee-coupled",
+      "layout": "flat",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "secureagg/shamir.py",
+        "secureagg/aggregator.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 57.658178,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "lh",
+      "task": "wro-sp24mm-matmul-sol",
+      "package_root": "tasks/lh/wro-sp24mm-matmul-sol",
+      "layout": "flat",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "sp24mm/matmul.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 10.28458,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "lh",
+      "task": "wro-ssm-ssd-chunkscan",
+      "package_root": "tasks/lh/wro-ssm-ssd-chunkscan",
+      "layout": "flat",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "vllm/model_executor/layers/mamba/ops/ssd_combined.py",
+        "vllm/model_executor/layers/mamba/ops/ssd_chunk_state.py",
+        "vllm/model_executor/layers/mamba/ops/ssd_state_passing.py",
+        "vllm/model_executor/layers/mamba/ops/ssd_chunk_scan.py",
+        "vllm/model_executor/layers/mamba/ops/ssd_bmm.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 467.4,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "lh",
+      "task": "wro-vllm-v1-priority-request-queue",
+      "package_root": "tasks/lh/wro-vllm-v1-priority-request-queue",
+      "layout": "flat",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "vllm/v1/core/sched/wro_priority_request_queue.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 312.0,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "lh",
+      "task": "wro-w8a16-groupdequant-matmul-sol",
+      "package_root": "tasks/lh/wro-w8a16-groupdequant-matmul-sol",
+      "layout": "flat",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "w8a16/matmul.py"
+      ],
+      "task_kind": "acceleration",
+      "perf_metric": null,
+      "ref_speedup": 6.42047,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "oracle.patch"
+      ],
+      "vendored_repo": true,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "e2e",
+      "task": "a3-moe-train-budget",
+      "package_root": "tasks/e2e/a3-moe-train-budget/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": "e2e_optimization",
+      "perf_metric": null,
+      "ref_speedup": 1.533747535323529,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle_grouped_moe"
+      ],
+      "vendored_repo": false,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "e2e",
+      "task": "a4-token-efficiency-budget",
+      "package_root": "tasks/e2e/a4-token-efficiency-budget/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile",
+        "Dockerfile.loop16"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": "e2e_optimization",
+      "perf_metric": null,
+      "ref_speedup": 1.204527530540146,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/ceiling"
+      ],
+      "vendored_repo": false,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "e2e",
+      "task": "a8-peft-adapter-byte-golf",
+      "package_root": "tasks/e2e/a8-peft-adapter-byte-golf/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": "e2e_optimization",
+      "perf_metric": null,
+      "ref_speedup": 1.2326578617539896,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/ceiling",
+        "solution/stash_oracle"
+      ],
+      "vendored_repo": false,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "e2e",
+      "task": "checkpoint-transfer-integrity",
+      "package_root": "tasks/e2e/checkpoint-transfer-integrity/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "submission/ckpt_transfer.py"
+      ],
+      "task_kind": "correctness",
+      "perf_metric": null,
+      "ref_speedup": null,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/ckpt_transfer.py"
+      ],
+      "vendored_repo": false,
+      "has_loop16": false,
+      "loop_harness": null,
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "implementation"
+    },
+    {
+      "bench": "e2e",
+      "task": "embed-compress-golf",
+      "package_root": "tasks/e2e/embed-compress-golf/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": "reward",
+      "perf_metric": null,
+      "ref_speedup": 1.4290238072817099,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/submission_encoder_ceiling_ref.py"
+      ],
+      "vendored_repo": false,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "e2e",
+      "task": "eval-scoring-throughput",
+      "package_root": "tasks/e2e/eval-scoring-throughput/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": "reward",
+      "perf_metric": null,
+      "ref_speedup": 2.24419,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/ceiling_arrow.py",
+        "solution/ceiling_columnar.py",
+        "solution/ceiling_fastmatch.py",
+        "solution/ceiling_scorer.py",
+        "solution/selftest_ceiling.py",
+        "tests/oracles"
+      ],
+      "vendored_repo": false,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "e2e",
+      "task": "kv-traffic-sol",
+      "package_root": "tasks/e2e/kv-traffic-sol/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": "e2e_optimization",
+      "perf_metric": null,
+      "ref_speedup": 2.5799320719769216,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/ceiling_triton_fused.py"
+      ],
+      "vendored_repo": false,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "e2e",
+      "task": "tiered-storage-io",
+      "package_root": "tasks/e2e/tiered-storage-io/task",
+      "layout": "task/",
+      "gpus": 0,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [
+        "submission/tiered_store.py"
+      ],
+      "task_kind": "correctness",
+      "perf_metric": null,
+      "ref_speedup": null,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/tiered_store.py"
+      ],
+      "vendored_repo": false,
+      "has_loop16": false,
+      "loop_harness": null,
+      "min_submissions": 1,
+      "max_submissions": 1,
+      "reward_class": "implementation"
+    },
+    {
+      "bench": "e2e",
+      "task": "varlen-prefill-attn-sol",
+      "package_root": "tasks/e2e/varlen-prefill-attn-sol/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": "e2e_optimization",
+      "perf_metric": null,
+      "ref_speedup": 1.5317,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/ceiling_triton_prefill.py"
+      ],
+      "vendored_repo": false,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    },
+    {
+      "bench": "e2e",
+      "task": "vllm-scheduler-mixed-batch-serving",
+      "package_root": "tasks/e2e/vllm-scheduler-mixed-batch-serving/task",
+      "layout": "task/",
+      "gpus": 1,
+      "dockerfiles": [
+        "Dockerfile"
+      ],
+      "primary_edit_paths": [],
+      "task_kind": "e2e_optimization",
+      "perf_metric": null,
+      "ref_speedup": 1.2857108264648467,
+      "has_oracle": true,
+      "oracle_artifacts": [
+        "solution/oracle_sweep_launch_server.sh",
+        "solution/oracle_v2_launch_server.sh"
+      ],
+      "vendored_repo": false,
+      "has_loop16": true,
+      "loop_harness": "inline",
+      "min_submissions": 1,
+      "max_submissions": 16,
+      "reward_class": "performance"
+    }
+  ],
+  "reward_schema": "kernelbench_reward_v3_oracle_relative",
+  "reward_formula_performance": "min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0",
+  "reward_formula_implementation": "1.0 iff all hidden cases pass and no gate fires, else 0.0",
+  "performance_tasks": 77,
+  "implementation_tasks": 8,
+  "with_loop_harness": 76,
+  "loop_1_to_16": 26,
+  "single_submission": 59,
+  "excluded_from_release": {
+    "note": "Final e2e selection narrowed 15 candidates to 10; these 5 e2e tasks were dropped and are NOT distributed with this package. Listed here for transparency only.",
+    "e2e": [
+      "fault-idempotent-resume",
+      "kv-transfer-protocol",
+      "multilora-serving",
+      "object-store-atomic",
+      "streaming-semantics"
+    ]
+  }
+}

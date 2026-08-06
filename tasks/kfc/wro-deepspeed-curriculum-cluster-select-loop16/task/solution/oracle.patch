@@ -1,0 +1,107 @@
+--- a/curriculum_cluster.py
++++ b/curriculum_cluster.py
+@@ -15,12 +15,12 @@
+                       rows, stopping once the end count is reached).
+ 
+ ``select_curriculum_cluster`` returns the concatenated 1-D int array of selected
+-sample-ids (in row-then-within-row order). This is the functionally-correct but slow
+-reference: it walks the rows in a Python loop and grows the result with a fresh
+-``numpy.concatenate`` per matching row (each append re-copies the whole running
+-buffer, so the row walk is quadratic in the number of selected rows) and re-sums the
+-one-epoch population from scratch. The public signature and the returned array are
+-the behavioural contract.
++sample-ids (in row-then-within-row order). This optimized implementation replaces
++the per-row Python concatenate walk with vectorized row selection: VALUE mode masks
++the qualifying rows and concatenates them once; PERCENTILE mode locates the two
++boundary rows with a cumulative-count prefix + boundary search and concatenates the
++whole interior rows plus the two partial edge slices in a single pass. The returned
++array is byte-identical to the reference.
+ 
+ Mirrors DeepSpeed ``deepspeed/runtime/data_pipeline/data_sampling/data_sampler.py``
+ ``DeepSpeedDataSampler.get_sample_based_on_metric_value`` /
+@@ -60,53 +60,43 @@
+     n_rows = len(index_to_sample)
+ 
+     if mode == "value":
+-        # NAIVE_VALUE_ROWWALK: Python loop, re-copy+concat the running buffer per hit.
+-        new_samples = None
+-        for row in range(n_rows):
+-            if metric[row] <= hi and metric[row] > lo:
+-                row_samples = np.copy(np.asarray(index_to_sample[row]))
+-                new_samples = (
+-                    row_samples
+-                    if new_samples is None
+-                    else np.concatenate((new_samples, row_samples), axis=None)
+-                )
+-        if new_samples is None:
++        # Vectorized row mask: (lo, hi], then one concatenate of the selected rows.
++        sel = np.flatnonzero((metric <= hi) & (metric > lo))
++        if sel.size == 0:
+             return np.array([], dtype=np.int64)
+-        return new_samples.astype(np.int64, copy=False)
++        parts = [np.asarray(index_to_sample[r]) for r in sel.tolist()]
++        return np.concatenate(parts, axis=None).astype(np.int64, copy=False)
+ 
+     if mode == "percentile":
+-        # NAIVE_PERCENTILE_ROWWALK: re-sum the epoch population, then a running-count
+-        # walk that partially slices the two boundary rows and re-copies+concats each.
+-        one_epoch_size = 0
+-        for row in range(n_rows):
+-            one_epoch_size += len(index_to_sample[row])
++        # Row-size cumulative prefix; the count window is [start_count, end_count).
++        row_sizes = np.fromiter(
++            (len(index_to_sample[r]) for r in range(n_rows)), dtype=np.int64, count=n_rows
++        )
++        one_epoch_size = int(row_sizes.sum())
+         sample_per_pct = one_epoch_size // num_bins
+         start_count = sample_per_pct * lo
+-        end_count = sample_per_pct * hi
+-        if hi == num_bins:
+-            end_count = one_epoch_size
+-
+-        new_samples = None
+-        current_count = 0
+-        for row in range(n_rows):
+-            row_size = len(index_to_sample[row])
+-            if current_count + row_size > start_count:
+-                row_start = max(0, start_count - current_count)
+-                if current_count + row_size <= end_count:
+-                    row_end = row_size
+-                else:
+-                    row_end = end_count - current_count
+-                row_samples = np.copy(np.asarray(index_to_sample[row])[row_start:row_end])
+-                new_samples = (
+-                    row_samples
+-                    if new_samples is None
+-                    else np.concatenate((new_samples, row_samples), axis=None)
+-                )
+-            current_count += row_size
+-            if current_count >= end_count:
+-                break
+-        if new_samples is None:
++        end_count = one_epoch_size if hi == num_bins else sample_per_pct * hi
++        if end_count <= start_count or one_epoch_size == 0:
+             return np.array([], dtype=np.int64)
+-        return new_samples.astype(np.int64, copy=False)
++
++        # Cumulative start offset of each row: cum_before[r] = sum(row_sizes[:r]).
++        cum_after = np.cumsum(row_sizes)              # count after including row r
++        cum_before = cum_after - row_sizes            # count before row r
++        # A row contributes iff cum_after[r] > start_count and cum_before[r] < end_count.
++        first = int(np.searchsorted(cum_after, start_count, side="right"))
++        last = int(np.searchsorted(cum_before, end_count, side="left")) - 1
++        if first > last:
++            return np.array([], dtype=np.int64)
++
++        parts = []
++        for row in range(first, last + 1):
++            cb = int(cum_before[row])
++            row_size = int(row_sizes[row])
++            row_start = max(0, start_count - cb)
++            row_end = row_size if cb + row_size <= end_count else end_count - cb
++            parts.append(np.asarray(index_to_sample[row])[row_start:row_end])
++        if not parts:
++            return np.array([], dtype=np.int64)
++        return np.concatenate(parts, axis=None).astype(np.int64, copy=False)
+ 
+     raise ValueError("mode must be 'value' or 'percentile'")

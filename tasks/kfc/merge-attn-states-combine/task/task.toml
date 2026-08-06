@@ -1,0 +1,80 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "merge-attn-states-combine"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "You are working inside a high-throughput LLM inference server."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 21600
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/insea-merge-attn-states-combine-loop16:loop-20260720T041357Z@sha256:a3591181926d7514ab27cf4aed19a67d5b6c26bb91cdb038c283cab68cd04090
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-merge-attn-states-combine:oss .`
+[environment]
+docker_image = "fai/kfc-merge-attn-states-combine:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32000
+gpus = 1
+# H20 只是**锚点标定用卡**,不是硬性限制。换卡时:①按 tests/ref_speedup.caveat.md 重标锚点;
+#   ②用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像。
+gpu_types = ["H20"]
+gpu_memory_gb = 96
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timeout_sec = 3600
+task_kind = "acceleration"
+contract_pattern = "A"
+timing_metric = "bytes_moved"
+candidate_source_root = "/app/repo"
+primary_edit_paths = ["/app/repo/combine_attn_states.py"]
+forbidden_edit_paths = ["/app/repo/tests/**", "/opt/verifier-*", "/tests/**", "/opt/loop/**"]
+result_paths = [
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+]
+
+[primary_metric]
+name = "combine_attn_states_bytes_moved_speedup"
+goal = "maximize"
+metric_kind = "bytes_moved"
+reward_formula = "acceleration: reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0 — 0.5 at parity with the oracle, capped 1.0 at oracle^2; speedup = measured speedup (per-shape baseline/candidate, geomean over 4 memory-bound (N,R,D) workload shapes) on H20. The value axis is HBM bytes moved: the naive baseline materializes the full (N,R,D) weighted-partial intermediate and makes several passes over it, while a single-pass combine never does; the op is bandwidth-bound so wall-time on H20 tracks the bytes-moved axis (gpu_bench.py also emits an analytic ideal_bytes_moved + avoidable naive_extra_bytes per shape). The 12-case hidden correctness suite (both outputs checked, incl. -inf empty rows), anti-cheat (only combine_attn_states.py may change) and the vendor-combine-primitive ban are hard gates."
+ref_speedup = 6.4424
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "NVIDIA H20"
+correctness_gates = [
+    "hidden_parity_suite",
+    "normal_fp32_bf16",
+    "boundary_single_chunk",
+    "boundary_many_chunks",
+    "boundary_nonpow2_D",
+    "degenerate_one_dominates",
+    "degenerate_neg_inf",
+    "error_reject",
+    "metamorphic_chunk_permute",
+    "metamorphic_lse_shift",
+    "hidden_bf16_large_D",
+    "trusted_restore",
+    "anti_cheat_forbidden_edit",
+    "forbidden_vendor_combine_primitive",
+]
+
+[loop]
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+mode = "baked"
+feedback_surface = "/opt/loop/submit.sh"

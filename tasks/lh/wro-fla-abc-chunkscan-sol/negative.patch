@@ -1,0 +1,11 @@
+--- a/fla/ops/abc/chunk.py
++++ b/fla/ops/abc/chunk.py
+@@ -59,7 +59,7 @@
+             k_i = kf[:, :, i]
+             v_i = sp[:, :, i]
+             g_i = g[:, :, i].exp()
+-            hk = hk * g_i[..., None, :] + k_i[..., None] * v_i[..., None, :]
++            hk = hk + k_i[..., None] * v_i[..., None, :]  # NEGATIVE: stage-1 gate dropped
+             ok[:, :, i] = (q_i[..., None] * hk).sum(-2)
+ 
+         qv = ok.softmax(-1)

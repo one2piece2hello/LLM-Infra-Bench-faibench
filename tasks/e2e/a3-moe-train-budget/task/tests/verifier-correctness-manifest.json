@@ -1,0 +1,89 @@
+{
+  "schema": "e2e_verifier_correctness_manifest_v2",
+  "task_id": "e2e-a3-moe-train-budget",
+  "family": "A_training",
+  "reward_model": {
+    "spec": "the bench reward spec — performance class, BOUNDED log form",
+    "name": "reward_md_log_speedup_v2_oracle_zero",
+    "formula": "reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0; range [0,1]",
+    "speedup_definition": "baseline_bpb / candidate_val_bpb  (held-out bits-per-byte at a FIXED wall-clock training budget; lower bpb is better, so the ratio is >1 only when the candidate beats the baseline recipe)",
+    "metric_kind": "quality_at_fixed_budget",
+    "metric_name": "val_bpb",
+    "metric_direction": "lower_is_better",
+    "timing_measured": false,
+    "semantic_caveat": "`speedup` / `ref_speedup` carry a QUALITY ratio, not a wall-clock ratio. Nothing in the reward is timed (the wall-clock is the fixed RESOURCE, not the metric). reward.md's bounded log envelope is ratio-agnostic; only the variable name says latency. The field names are kept for schema compatibility and are described by metric_kind / metric_name / metric_direction / timing_measured.",
+    "baseline_bpb": 1.9550684328299388,
+    "baseline_bpb_status": "CALIBRATED ON H20 2026-07-27: median of 5 runs of the SHIPPED starter through the shipped harness (values [1.962770085976607, 1.9510982056023425, 1.9526446798517447, 1.9550684328299388, 1.986950471502198]), spread 0.035852 bpb (1.834%), cv 0.00755. FROZEN constant; the scorer never runs the baseline.",
+    "baseline_cv": 0.007548522919998558,
+    "baseline_runs": 5,
+    "ref_speedup": 1.533747535323529,
+    "ref_speedup_status": "CALIBRATED ON H20 2026-07-27: baseline median / oracle median = 1.533748 from 5 baseline and 5 oracle runs, INTERLEAVED A/B in one session. Oracle values [1.277821048895357, 1.2779210097368356, 1.2681276407338593, 1.2747002931075853, 1.263267699635585], spread 0.014653 bpb (1.150%), cv 0.00508. Clears reward.md's 1.15 authoring floor; worst-case pairing under the observed spread is 1.526775. FROZEN constant; the oracle is NOT in the image and is NEVER run at scoring time.",
+    "ref_speedup_authoring_floor": 1.15,
+    "oracle_runs": 5,
+    "oracle_bpb_median": 1.2747002931075853,
+    "oracle_in_image": false,
+    "fail_closed": "when baseline_bpb or ref_speedup is absent / <= 1 / below the authoring floor the run is a HARD FAIL with reason `ref_speedup_invalid_or_missing`; it is NEVER silently treated as 1.0.",
+    "baseline_spread_abs": 0.03585226589985546,
+    "oracle_cv": 0.00507533872459635,
+    "oracle_spread_abs": 0.014653310101250705,
+    "ref_speedup_worst_case_pairing": 1.5267752785472517,
+    "hardware_and_data_caveat": "baseline_bpb=1.9550684328299388 与 ref_speedup=1.533747535323529 均在 H20 上、且在 task/environment/Dockerfile 里那份 WikiText-103-raw + SentencePiece-BPE-8192 语料上标定。 若你的 GPU 不是 H20,或重建语料的指纹(build 日志里打印的 tokenizer.model / train.bin sha256)与已知良好构建不一致,这两个常量就不再可比 —— 请按 recalibrate_howto 重新标定后再计分。 参考实现:强基线 task/solution/baseline_dense_floor/,oracle task/solution/oracle_grouped_moe/(reviewer-only,不进镜像)。",
+    "recalibrate_howto": {
+      "why": "reward = min(1, ln((baseline_bpb/val_bpb)/ref_speedup)/ln(ref_speedup)), 且 (baseline_bpb/val_bpb) <= ref_speedup 时为 0;两个常量是标定值,判分时只读、不重跑参考实现。",
+      "note": "计分路径故意不接受 VERIFIER_MODE(反作弊),因此重标定的做法是把参考实现挂成 candidate 来跑。",
+      "step1_baseline": "docker run --rm --gpus all --shm-size=8g -v \"$PWD/solution/baseline_dense_floor:/app/submission:ro\" -v \"$PWD/tests:/tests:ro\" fai/e2e-a3-moe-train-budget:oss bash /tests/test.sh",
+      "step2_oracle": "docker run --rm --gpus all --shm-size=8g -v \"$PWD/solution/oracle_grouped_moe:/app/submission:ro\" -v \"$PWD/tests:/tests:ro\" fai/e2e-a3-moe-train-budget:oss bash /tests/test.sh",
+      "step3_read": "从 /logs/verifier/benchmark_results.json 取 val_bpb(建议各跑 >=3 次取中位数)",
+      "step4_write": "写回本文件 reward_model.baseline_bpb = 强基线中位数;reward_model.ref_speedup = baseline_bpb / oracle 中位数",
+      "guard": "ref_speedup <= 1 或缺失 => 设计上 HARD FAIL 0;authoring floor 为 1.15"
+    }
+  },
+  "budget": {
+    "wallclock_sec": 600,
+    "kind": "WALL-CLOCK SECONDS of training (the fixed RESOURCE, not the metric). Enforced EXTERNALLY by tests/timer.sh: the training entry is started in its own session and the whole PROCESS GROUP is SIGTERM'd at the cap and SIGKILL'd 8 s later, so a detached background trainer cannot outlive the budget. Nothing is trusted from the candidate — no in-loop timer, no self-reported step or token count.",
+    "note": "The wall-clock is the resource under which MoE throughput becomes the lever: more optimizer steps in T => lower bpb."
+  },
+  "harness_seed": 1337,
+  "seed_policy": "The harness FIXES the training seed (not solver-selectable) -> kills the seed lottery. Formal scoring MAY run 3 harness seeds and take the median reward; single-shot validation uses the one fixed seed.",
+  "quality_gate": {
+    "param_floor": 150000000,
+    "param_floor_note": "The A3 CAPACITY FLOOR (the MoE-forcing constraint). The model MUST have >= param_floor TOTAL parameters, re-counted by the harness from the loaded module with weight-tie deduplication. At this capacity a DENSE model costs ~2*P_total FLOPs/token and is step-starved in T, while a sparse top-k MoE trains far more steps at the SAME total capacity — IF the sparsity is realized as real single-card throughput.",
+    "min_param_count": 1000000,
+    "min_plausible_val_bpb": 0.9,
+    "min_plausible_val_bpb_note": "ANTI-SPOOF / ANTI-CONTAMINATION floor, tightened from 0.50. No honest recipe trained from scratch inside this wall-clock budget at this capacity reaches 0.90 bpb on the held-out split (the demonstrated in-budget ceiling is ~1.22), so a value below the floor means a forged loss or held-out contamination, not a better model. Firing this check is reported as `anti_cheat_triggered`.",
+    "max_plausible_val_bpb": 3.0,
+    "ood_loss_ratio": 0.7,
+    "logits_position_variance_floor": 0.0001,
+    "logits_loss_agreement_tol": 0.05,
+    "expected_total_checks": 6,
+    "note": "capacity floor (A3 MoE-forcing) + anti-spoof kit lifted verbatim from the parameter-golf task family: a real LM scores real held-out text << arbitrary ids, forward(x,y) loss == CE(forward(x),y), logits vary across positions, >=1M params, val_bpb inside a plausibility band. A TRUNCATED suite (fewer than expected_total_checks) can never score above 0 (`gate_suite_incomplete`)."
+  },
+  "held_out": {
+    "corpus": "/tests/holdout_corpus.txt",
+    "identity": "canonical WikiText-103 TEST split (60 articles), uploaded FRESH at scoring and NOT baked into the image; disjoint from the baked train shard (/data/datasets/wikitext_bpe8k/train.bin) and from the solver's val monitor (/data/datasets/wikitext_bpe8k/val.bin = the WikiText-103 VALIDATION split)",
+    "eval": "stabilized median-of-3-shifted-passes, fp32 cross-entropy, bits-per-byte via SentencePiece byte-LUTs (parameter-golf eval machinery)"
+  },
+  "anti_tamper": {
+    "frozen_surface_fingerprint": "tests/test.sh sha256s EVERY file in /tests before launching the training and re-checks after it returns. Any content change => `anti_cheat_triggered` + `forbidden_edit_path`; any mode change or unexpected new file in /tests => `anti_cheat_triggered`.",
+    "quarantine": "/tests is chmod 0000 for the duration of the training phase so the held-out corpus and the calibrated constants are unreadable while the solver's code runs.",
+    "env_override_strip": "every E2E_*_OVERRIDE variable is unset before the scorer runs, so no environment variable on the scored path can influence the budget, the seed set or the frozen reward constants (a login shell sources ~/.bashrc, which the solver owns). The overrides remain usable by the author's calibration driver, which invokes compute_reward.py directly.",
+    "residual": "With training_uid set, a candidate cannot read /tests during its own run. Residual: the scoring harness itself and any interactive session are root, and the SOLVER's own iteration session (outside scoring) is root — but /tests does not exist in the image at all any more, so there is nothing to read there until scoring, when the drop is in force.",
+    "training_uid": 65534,
+    "training_uid_note": "The candidate's training entry runs as uid 65534 (nobody), NOT root. This is what makes the /tests quarantine real: chmod 0000 is ignored by uid 0, so without the drop a root solver could simply read the held-out corpus it is scored on and train on it. test.sh grants the unprivileged uid access to /app/submission (write), /app/repo and the training corpus (read) and to nothing else, and records the euid the training ACTUALLY ran under (observed_train_uid in metrics.json) rather than the intent. Set to null to disable.",
+    "timer_process_group": "tests/timer.sh starts the training in its OWN session (fork-then-setsid so setsid can never fail with EPERM) and signals the whole PROCESS GROUP at the cap, with a SELF-KILL GUARD that refuses to signal the harness's own group. MEASURED on NVIDIA H20 2026-07-27: without the guard, a silently-failed setsid put the training in the harness's group and the group kill took test.sh down right after the training finished — the run produced ZERO result files and looked like a training hang. The gate suite caught it; it is fixed and re-verified.",
+    "straggler_reaper": "After the wall-clock cap timer.sh kills the training's process group AND then every process owned by the unprivileged training uid. MEASURED 2026-07-28 with solution/probe_budget_bite: a group kill ALONE is insufficient, because a grandchild that calls setsid() itself lands in a new session the group kill never reaches — it outlived the budget, kept rewriting the scored checkpoint, and held the harness's log pipe open so the run HUNG instead of scoring. The uid-wide reaper reaches any descendant regardless of session; the training log is now written to a file rather than through a pipe a survivor could hold open."
+  },
+  "entry_contract": {
+    "training": "/app/submission/run_training.sh (harness env: SEED, PARAM_FLOOR, WALLCLOCK_SEC, OUT_CKPT, DATA_PATH, TOKENIZER_PATH, NANOGPT_REPO); must write $OUT_CKPT within the budget. DATA_PATH/TOKENIZER_PATH are PINNED by the harness, not inherited from the environment.",
+    "reload": "/app/submission/train_gpt.py :: load_model_for_verification(checkpoint_path, device) -> nn.Module or (args, model) honoring model(x)->logits (B,T,V) and model(x,y)->scalar CE loss (pure CE; any MoE auxiliary loss is a train-time side channel)"
+  },
+  "frozen_surface": [
+    "/tests/compute_reward.py",
+    "/tests/test.sh",
+    "/tests/holdout_corpus.txt",
+    "/tests/timer.sh",
+    "/tests/verifier-correctness-manifest.json"
+  ],
+  "compute_reward_sha256": "a482fd5ed86af2f906017d4539d64bad39e6d117840db052621e2ecd8422a85e",
+  "editable_area": "the whole /app/repo (nanoGPT) + /app/submission, minus the frozen surface"
+}

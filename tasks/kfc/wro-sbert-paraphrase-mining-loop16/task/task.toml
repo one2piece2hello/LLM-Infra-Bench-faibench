@@ -1,0 +1,49 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wro-sbert-paraphrase-mining-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "wro-sbert-paraphrase-mining — loop16 (restore production speed)"
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wro-sbert-paraphrase-mining-loop16:v1@sha256:59f977cc5dd8e4ed2d74b097e77cf0277109b70d30d1c98445fdfd9e189c5832
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wro-sbert-paraphrase-mining-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wro-sbert-paraphrase-mining-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timing_metric = "paraphrase_mining_speedup"
+primary_edit_paths = ["paraphrase_miner.py"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+ref_speedup = 45.338376
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+[loop]
+# NOTE: the /opt/loop harness baked into the image applies its own 3/16 in-session budget; for in-session loop scoring the image is authoritative.
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+# Single-submission policy — min=max=1; the first
+# `bash /opt/loop/submit.sh` IS the final graded submission (submit == finalize).
+declared_submission_policy = "single_submission"

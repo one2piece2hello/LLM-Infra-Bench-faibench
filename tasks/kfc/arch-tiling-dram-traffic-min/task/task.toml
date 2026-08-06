@@ -1,0 +1,80 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "arch-tiling-dram-traffic-min"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "You are tuning the tile-size planner for a blocked matrix-multiply pipeline."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 21600
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/insea-arch-tiling-dram-traffic-min-loop16:loop-20260721T111627Z@sha256:455796ac934c9f40cb3666c8ecffa915da861eac32b0cf7b32ee14e49e7b2b15
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-arch-tiling-dram-traffic-min:oss .`
+[environment]
+docker_image = "fai/kfc-arch-tiling-dram-traffic-min:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 16000
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timeout_sec = 3600
+task_kind = "acceleration"
+contract_pattern = "A"
+timing_metric = "peak_memory"
+candidate_source_root = "/app/repo"
+primary_edit_paths = ["/app/repo/tile_planner.py"]
+forbidden_edit_paths = ["/app/repo/tests/**", "/opt/verifier-*", "/tests/**", "/opt/loop/**"]
+result_paths = [
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+]
+
+[primary_metric]
+name = "tile_plan_dram_traffic_speedup"
+goal = "maximize"
+metric_kind = "peak_memory"
+reward_formula = "acceleration: reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0; the underlying measurement is measured speedup = baseline_traffic / candidate_traffic, where traffic = total modeled off-chip bytes moved by the tiling plan (sum over problems of esz*(M*K*(N//Tn) + K*N*(M//Tm) + 2*M*N)). The metric is a deterministic COMPUTED byte total derived from the returned plan on a fixed problem corpus (NO valgrind, NO GPU -- pure-Python stdlib). Correctness = PLAN VALIDITY: the 14-case hidden suite checks that every problem gets one [Tm,Tn,Tk] drawn from its allowed choices AND fitting the on-chip capacity ((Tm*Tk+Tk*Tn+Tm*Tn)*esz <= cap), validity derived independently; an invalid plan (small traffic that would not fit on chip) is a HARD FAIL -> reward 0. Anti-cheat (only tile_planner.py may change) and the numpy/torch/scipy/solver heavy-library ban are hard gates."
+ref_speedup = 63.46
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+correctness_gates = [
+    "hidden_case_suite",
+    "normal_valid_complete",
+    "multi_problem_valid",
+    "capacity_reject",
+    "out_of_choices_reject",
+    "smallest_tile_always_fits",
+    "reference_headroom_exists",
+    "degenerate_single_choice",
+    "degenerate_single_problem",
+    "error_bad_dimension",
+    "error_bad_choices",
+    "error_bad_cap",
+    "metamorphic_traffic_scale_esz",
+    "work_evidence_traffic_matches_model",
+    "anti_hacking_min_traffic_over_cap_rejected",
+    "candidate_plan_valid_on_corpus",
+    "anti_cheat_forbidden_edit",
+    "forbidden_heavy_library",
+]
+
+[loop]
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+mode = "baked"
+feedback_surface = "/opt/loop/submit.sh"

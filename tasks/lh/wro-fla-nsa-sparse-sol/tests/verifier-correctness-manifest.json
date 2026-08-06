@@ -1,0 +1,13 @@
+{
+  "ref_speedup": 1036.420558,
+  "hardware_caveat": "此 ref_speedup 在 NVIDIA H20 上标定。判分只读该常量、不重跑参考实现;tests/test.sh 从镜像内 /opt/verifier-correctness-manifest.json 读它 —— 缺失会静默回落 1.0 使 reward 全归 0。本 bench 锚点普遍很大,因为比的是「eager/dense 参考实现 vs 真 kernel」,比值由算法差异主导、相对可移植,但仍是单机测量。硬件不一致请按 recalibrate_howto 用本题包的 oracle.patch 重标。 本题 ref_speedup=1036.420558,oracle-only marker='parallel_nsa_fwd_kernel'(挖洞基线里计数应为 0,打完 oracle 应为 1)。",
+  "recalibrate_howto": {
+    "note": "verifier 原生支持模式分派;参考实现按路径传入、从不烤进镜像。模式:candidate | noop | oracle | negative",
+    "step1_oracle": "docker run --rm --gpus all -v \"$PWD/tests:/tests:ro\" -v \"$PWD:/patches:ro\" -e KERNELBENCH_VERIFY_MODE=oracle -e KERNELBENCH_ORACLE_PATCH=/patches/oracle.patch fai/lh-fla-nsa-sparse:oss bash /tests/test.sh",
+    "step2_read": "从 /logs/verifier/ 读实测 speedup(建议 >=3 次取中位数)",
+    "step3_write": "写回本文件 ref_speedup;镜像内 /opt/ 的副本由 Dockerfile 从本文件 COPY,重建镜像即同步",
+    "sanity_noop": "-e KERNELBENCH_VERIFY_MODE=noop → 未改动的树应得 no-op 值",
+    "sanity_negative": "-e KERNELBENCH_VERIFY_MODE=negative -e KERNELBENCH_NEGATIVE_PATCH=/patches/negative.patch → 必须 0",
+    "oracle_impl": "本 task 目录下的 oracle.patch(reviewer-only,已被 environment/.dockerignore 排除)"
+  }
+}

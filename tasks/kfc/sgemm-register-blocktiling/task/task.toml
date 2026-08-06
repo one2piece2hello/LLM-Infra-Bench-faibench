@@ -1,0 +1,83 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "sgemm-register-blocktiling"
+bench = "kfc"
+kind = "performance"
+language = "cuda"
+title = "You are working on the dense matrix-multiply kernel at the heart of a high-throughput inference server's linear layers."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 21600
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/insea-sgemm-register-blocktiling-loop16:loop-20260720T180039Z@sha256:801dfb5d08e671fb8f4d43f42f080444a44e12c31fb663be465c716a502b6c84
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-sgemm-register-blocktiling:oss .`
+[environment]
+docker_image = "fai/kfc-sgemm-register-blocktiling:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32000
+gpus = 1
+# H20 只是**锚点标定用卡**,不是硬性限制。换卡时:①按 tests/ref_speedup.caveat.md 重标锚点;
+#   ②用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像。
+gpu_types = ["H20"]
+gpu_memory_gb = 96
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timeout_sec = 3600
+task_kind = "acceleration"
+contract_pattern = "A"
+timing_metric = "wall_time_ms"
+candidate_source_root = "/app/repo"
+primary_edit_paths = ["/app/repo/sgemm_kernel.cu"]
+forbidden_edit_paths = ["/app/repo/sgemm.py", "/app/repo/tests/**", "/opt/verifier-*", "/tests/**", "/opt/loop/**"]
+result_paths = [
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+]
+
+[primary_metric]
+name = "fp32_sgemm_gpu_speedup"
+goal = "maximize"
+metric_kind = "wall_time"
+reward_formula = "acceleration: reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0; the underlying measurement is measured speedup (per-shape baseline_ms/candidate_ms, geomean over 4 compute-bound (M,N,K) SGEMM shapes) on H20; the op is compute-bound so wall-time tracks achieved fp32 throughput / arithmetic intensity. The 15-case hidden correctness suite (fp64 reference), anti-cheat (only sgemm_kernel.cu may change) and the prebuilt-matmul ban (cuBLAS/cublasLt/cutlass/libtorch matmul) are hard gates. The candidate .cu is recompiled with nvcc at scoring."
+ref_speedup = 2.99
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "NVIDIA H20"
+correctness_gates = [
+    "hidden_parity_suite",
+    "normal_square",
+    "normal_rect",
+    "alpha_beta_accumulate",
+    "alpha_zero",
+    "boundary_nonmultiple",
+    "boundary_nonmultiple_large_k",
+    "degenerate_k1",
+    "degenerate_zero",
+    "identity_operand",
+    "does_not_mutate_C",
+    "error_reject",
+    "metamorphic_scale",
+    "metamorphic_permute",
+    "hidden_large_k_rect",
+    "anti_cheat_forbidden_edit",
+    "forbidden_prebuilt_matmul",
+]
+
+[loop]
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+mode = "baked"
+feedback_surface = "/opt/loop/submit.sh"

@@ -1,0 +1,22 @@
+{
+  "schema_version": "kb_loop_dev_manifest_v1",
+  "task_id": "e2e-a8-peft-adapter-byte-golf-loop16",
+  "note": "DEV-ONLY proxy constants for the per-round loop. BAKED here (root:root 0600, unreadable by the solver's dropped uid) and read from THIS FILE ONLY. Contains NO calibrated anchor (strong_baseline_ce / ref_speedup), NO held-out corpus: the per-round signal is the RAW adaptation gain (base_ce - candidate_ce) on the PUBLIC dev corpus /data/datasets/a8_syscode/val.txt, never normalised against the graded anchor. The graded score is produced after the session by the runner from a freshly-uploaded /tests over the HIDDEN held-out split, normalising the gain against the hidden strong_baseline_ce through the calibrated log curve; this loop only decides WHICH snapshot is graded.",
+  "submission_dir": "/app/submission",
+  "base_model_dir": "/app/base_model",
+  "dev_corpus": "/data/datasets/a8_syscode/val.txt",
+  "dev_corpus_note": "the PUBLIC dev corpus the solver already has (/data/datasets/a8_syscode/val.txt). The GRADED held-out corpus (tests/holdout_corpus.txt) is uploaded fresh at scoring and is NOT in this image; the dev gain is measured on the public split only.",
+  "max_total_bytes": 327680,
+  "max_artifact_bytes": 262144,
+  "max_entry_bytes": 65536,
+  "byte_budget_note": "the DECLARED-file byte gate (adapter.bin + adapter_entry.py) is enforced exactly as the grade's disclosed rule. 🔴 The grade ALSO runs a whole-filesystem stash sweep + quarantine that this dev proxy does NOT reproduce (it is heavy and its inventory is graded-surface), so a candidate that stashes bytes outside the declared files can pass the dev byte gate and still fail the grade's sweep.",
+  "seq_len": 1024,
+  "batch_seqs": 2,
+  "dev_eval_tokens": 65536,
+  "dev_eval_tokens_note": "REDUCED public-corpus CE budget for the per-round loop (65,536 tokens vs the graded 196,608), eval-only (no training in the candidate path, matching the grade). A per-round pass is two forward-only CE evals of the 0.5B base model — well under a minute on H20.",
+  "min_param_count": 300000000,
+  "min_plausible_ce": 0.20,
+  "max_plausible_ce": 12.0,
+  "ood_loss_ratio": 0.7,
+  "logits_position_variance_floor": 0.0001
+}

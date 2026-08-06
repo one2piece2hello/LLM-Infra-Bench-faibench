@@ -1,0 +1,117 @@
+diff --git a/streamed_apply.py b/streamed_apply.py
+index ec24f5d..12c21a3 100644
+--- a/streamed_apply.py
++++ b/streamed_apply.py
+@@ -1,61 +1,13 @@
+-"""Stream a list of host-resident chunks to the GPU and apply a per-chunk op.
+-
+-Public entry point:
+-    ``streamed_chunk_apply(chunks, compute) -> torch.Tensor``
+-
+-This is the data-movement step in front of a chunked GPU workload: a large tensor
+-lives in host (CPU) memory, already split into ``N`` chunks (row-blocks). Each chunk
+-must be moved host-to-device and then transformed by a per-chunk ``compute`` op that
+-runs on the GPU. The processed chunks are concatenated (in input order) into a single
+-device tensor.
+-
+-Contract
+---------
+-- ``chunks``: a ``list``/``tuple`` of CPU ``torch.Tensor`` (host memory). Each chunk is
+-  at least 1-D; the leading dimension is the row/block axis and may differ across
+-  chunks, while every chunk shares the same trailing shape ``chunk.shape[1:]`` and the
+-  same floating dtype.
+-- ``compute``: a callable mapping a CUDA tensor to a CUDA tensor. It is applied once to
+-  the on-device copy of each chunk and preserves the leading (row) dimension. Treat it
+-  as an opaque GPU operation — invoke it once per chunk; do not inspect or rewrite it.
+-
+-Functionality::
+-
+-    for each chunk c (in order):
+-        d       = c copied to the GPU            # host -> device transfer
+-        out_c   = compute(d)                     # per-chunk GPU work
+-    result = concatenate(out_c for all chunks, along dim 0)
+-
+-The result is a single CUDA tensor equal to running the transfer-then-compute for
+-every chunk sequentially and concatenating the outputs in the original chunk order.
+-An empty ``chunks`` list yields an empty CUDA tensor.
+-
+-Returns
+--------
+-A CUDA ``torch.Tensor``: the per-chunk outputs concatenated along dim 0, in chunk order.
+-
+-Error contract
+---------------
+-- ``TypeError`` if ``compute`` is not callable, ``chunks`` is not a list/tuple, a chunk
+-  is not a ``torch.Tensor``, or the chunks do not all share one dtype.
+-- ``ValueError`` if a chunk is not in host (CPU) memory, a chunk is 0-D, or the chunks
+-  do not all share the same trailing shape ``chunk.shape[1:]``.
+-
+-Note on allowed operations
+---------------------------
+-Build the transfer/compute schedule yourself with explicit CUDA stream and event
+-management (``torch.cuda.Stream`` / ``torch.cuda.Event`` / pinned host memory /
+-non-blocking copies are the intended tools). Do NOT delegate the pipelining to a
+-framework auto-overlap / graph-capture convenience (CUDA-graph capture-and-replay of
+-the loop, dataloader-style background prefetchers, or any helper that auto-pipelines
+-host-to-device copies with compute); those are out of scope and are blocked at scoring.
+-
+-The current implementation moves one chunk to the GPU and only then launches its
+-compute, one chunk fully after another on a single stream. While a chunk's bytes are
+-streaming in, the GPU compute units sit idle; while a chunk is being computed, the
+-transfer engine sits idle. The two phases never run at the same time, so the total
+-latency is the *sum* of all transfers plus all compute — the transfer latency is fully
+-exposed instead of being hidden behind compute.
++"""REVIEWER-ONLY baseline2 (soundness probe) for insea-h2d-prefetch-compute-overlap-loop16.
++
++A CORRECT implementation that is mechanically DIFFERENT from the double-buffered oracle:
++instead of a depth-2 staging ring with tight per-step prefetch, it allocates ONE device
++buffer per chunk and queues ALL host-to-device copies on the copy stream up front, each
++tagged with its own completion event; compute then consumes each buffer after waiting on
++that chunk's event. This still overlaps the copies of later chunks with the compute of
++earlier ones (a different, front-loaded pipeline structure), stays correct, and must earn a
++POSITIVE wall-time reward on its own merit — if the verifier could only reward the exact
++oracle code it would be oracle-overfit and must be fixed. Reviewer-only; NEVER baked.
+ """
+ 
+ import torch
+@@ -88,18 +40,29 @@ def _validate(chunks, compute):
+ 
+ 
+ def streamed_chunk_apply(chunks, compute):
+-    """See module docstring for the full contract.
+-
+-    Naive serial schedule: for each chunk, copy it to the GPU and then compute it,
+-    one chunk fully after another on the default stream. Correct, but the host-to-device
+-    transfer latency is never hidden behind compute (transfers and compute never overlap),
+-    so total latency is the sum of every transfer plus every compute.
+-    """
++    """Front-loaded copy-stream overlap with per-chunk buffers + events (reviewer baseline2)."""
+     _validate(chunks, compute)
+-    if len(chunks) == 0:
++    n = len(chunks)
++    if n == 0:
+         return torch.empty(0, device="cuda")
++
++    dev = torch.device("cuda")
++    compute_stream = torch.cuda.current_stream()
++    copy_stream = torch.cuda.Stream()
++
++    dbufs = []
++    copy_done = []
++    with torch.cuda.stream(copy_stream):
++        for c in chunks:
++            d = torch.empty_like(c, device=dev)
++            d.copy_(c, non_blocking=True)
++            e = torch.cuda.Event()
++            e.record(copy_stream)
++            dbufs.append(d)
++            copy_done.append(e)
++
+     outs = []
+-    for c in chunks:
+-        d = c.to("cuda", non_blocking=False)   # blocking host -> device on the default stream
+-        outs.append(compute(d))                # compute only starts after the copy finishes
++    for i in range(n):
++        compute_stream.wait_event(copy_done[i])
++        outs.append(compute(dbufs[i]))
+     return torch.cat(outs, dim=0)

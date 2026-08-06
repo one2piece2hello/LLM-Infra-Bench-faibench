@@ -1,0 +1,14 @@
+{
+  "ref_speedup": 57.658178,
+  "calibrated_on": "CPU lane (Intel Sapphire Rapids, 8 vCPU); pure-Python Shamir secure-aggregation; measured oracle raw speedup vs the degraded recompute-per-coordinate baseline",
+  "hardware_caveat": "此 ref_speedup 在**作者的 CPU 通道(Intel Sapphire Rapids)**上标定 —— 本题 task.toml 声明 gpus = 0,判分路径不使用 GPU(标定条件见 calibrated_on)。判分时只读该常量、不重跑参考实现,且 tests/test.sh 从镜像内 /opt/verifier-correctness-manifest.json 读它 —— 缺失会静默回落 1.0,使所有 reward 归 0。本 bench 的锚点普遍很大(6×~1344×),因为比较的是「慢但正确的参考实现 vs 真实现」,比值由算法差异主导、相对可移植,但仍是单机测量。换硬件/换环境时请先按 recalibrate_howto 用本题包的 oracle.patch 在本机重标该锚点,再计分。 本题 ref_speedup=57.658178。",
+  "recalibrate_howto": {
+    "note": "verifier 原生支持模式分派;参考实现按路径传入、从不烤进镜像。模式:candidate | noop | oracle | negative",
+    "step1_oracle": "docker run --rm -v \"$PWD/tests:/tests:ro\" -v \"$PWD:/patches:ro\" -e KERNELBENCH_VERIFY_MODE=oracle -e KERNELBENCH_ORACLE_PATCH=/patches/oracle.patch fai/lh-secure-agg-shamir:oss bash /tests/test.sh",
+    "step2_read": "从 /logs/verifier/ 读实测 speedup(建议 >=3 次取中位数)",
+    "step3_write": "写回本文件 ref_speedup;镜像内 /opt/ 的副本由 Dockerfile 从本文件 COPY,重建镜像即同步",
+    "sanity_noop": "-e KERNELBENCH_VERIFY_MODE=noop → 未改动的树应得 no-op 值(见 task.toml primary_metric)",
+    "sanity_negative": "-e KERNELBENCH_VERIFY_MODE=negative -e KERNELBENCH_NEGATIVE_PATCH=/patches/negative.patch → 必须 0",
+    "oracle_impl": "本 task 目录下的 oracle.patch(reviewer-only,已被 environment/.dockerignore 排除)"
+  }
+}

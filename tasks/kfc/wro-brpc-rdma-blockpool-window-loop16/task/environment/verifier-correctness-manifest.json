@@ -1,0 +1,10 @@
+{
+  "task_id": "wro-brpc-rdma-blockpool-window",
+  "perf_metric": "speedup",
+  "ref_speedup": 3.767532,
+  "oracle_candidate_ms": 57.9804,
+  "baseline_ms": 218.443,
+  "noop_speedup": 0.9879,
+  "baseline2_speedup": 1.229546,
+  "anchor_source": "4-mode validation run on the authoring CPU lane (Intel Sapphire Rapids)"
+}

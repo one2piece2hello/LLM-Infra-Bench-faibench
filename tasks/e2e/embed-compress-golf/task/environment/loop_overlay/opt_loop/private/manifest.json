@@ -1,0 +1,13 @@
+{
+  "max_submissions": 16,
+  "min_submissions": 1,
+  "note": "dev reward is an in-session PUBLIC PROXY: the task's own verifier (compute_reward.py) run on the PUBLIC, DISJOINT dev split at /data/retrieval/dev_* with an UNCALIBRATED manifest (no anchor). Used ONLY to rank best-of-k; the runner end-of-session /tests grade over the hidden test split (with the calibrated anchor) is authoritative. This private tree bakes NO held-out corpus/queries/qrels answer-key and NO calibrated ref_speedup / strong_baseline_ndcg.",
+  "perf_metric": "reward",
+  "reward_form": "RAW dev nDCG@10 on the public dev split (higher is better); NOT the anchor-normalized graded reward; the same byte-budget + anti-degenerate hard gates apply.",
+  "schema_version": "kernelbench_loop_manifest_v1",
+  "scope": [
+    "submission/submission_encoder.py"
+  ],
+  "scoring": "task tests/compute_reward.py on the PUBLIC /data/retrieval/dev split, candidate encoder from /app/submission",
+  "task_id": "e2e-g2-embed-compress-golf-loop16"
+}

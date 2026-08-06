@@ -1,0 +1,11 @@
+--- a/torchao/prototype/quantized_training/int8.py
++++ b/torchao/prototype/quantized_training/int8.py
+@@ -50,7 +50,7 @@
+     out = torch.empty_like(tensor, dtype=torch.int8)
+     for i in range(R):
+         row = tensor[i]
+-        s = row.abs().amax() / 127
++        s = row.abs().mean() / 127  # NEGATIVE known-bad: mean is not absmax
+         scale[i] = s
+         inv = 1.0 / s.float().clip(eps)
+         q = row.float() * inv

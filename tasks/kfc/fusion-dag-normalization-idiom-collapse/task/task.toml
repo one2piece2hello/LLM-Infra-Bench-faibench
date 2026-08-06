@@ -1,0 +1,79 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "fusion-dag-normalization-idiom-collapse"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "You are working on a graph fusion pass inside an ahead-of-time compiler for tensor programs."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 21600
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/insea-fusion-dag-normalization-idiom-collapse-loop16:loop-20260720T085332Z@sha256:f3ba8c47aca049e7c533765b4a782057413af0ad1f2cad37df30ef0a7f73489d
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-fusion-dag-normalization-idiom-collapse:oss .`
+[environment]
+docker_image = "fai/kfc-fusion-dag-normalization-idiom-collapse:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 16000
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+timeout_sec = 3600
+task_kind = "acceleration"
+contract_pattern = "A"
+timing_metric = "op_count"
+candidate_source_root = "/app/repo"
+primary_edit_paths = ["/app/repo/dag_fusion.py"]
+forbidden_edit_paths = ["/app/repo/tests/**", "/opt/verifier-*", "/tests/**", "/opt/loop/**"]
+result_paths = [
+    "/logs/verifier/verifier_state.json",
+    "/logs/verifier/correctness_results.json",
+    "/logs/verifier/benchmark_results.json",
+    "/logs/verifier/reward.json",
+    "/logs/verifier/reward.txt",
+]
+
+[primary_metric]
+name = "fusion_dag_opcount_speedup"
+goal = "maximize"
+metric_kind = "op_count"
+reward_formula = "performance (the reward specification): reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0; matching the oracle scores 0.5, reaching oracle^2 caps at 1.0, range [0,1]. Pre-gates that force reward=0: build/import failure, ANY correctness case fail, anti-cheat trip, forbidden-path edit, speedup<=1, ref_speedup<=1. ONE graded submission only (min=max=1); submit == finalize."
+ref_speedup = 11.29167
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+correctness_gates = [
+    "hidden_case_suite",
+    "normal_canonical_one_idiom",
+    "normal_two_independent_idioms",
+    "boundary_idiom_feeds_trailing_op",
+    "boundary_dupsub_variant_stays_equivalent",
+    "degenerate_no_idiom_unchanged",
+    "degenerate_output_is_input",
+    "error_bad_exponent_not_fused",
+    "error_nonconstant_epsilon_not_fused",
+    "error_interior_escape_not_fused",
+    "metamorphic_node_reorder_same_count",
+    "metamorphic_unrelated_branch",
+    "hidden_cast_variant_stays_equivalent",
+    "hidden_shared_input_two_idioms",
+    "candidate_reference_agreement",
+    "anti_cheat_forbidden_edit",
+    "forbidden_graph_optimizer_or_rewrite_engine",
+]
+
+[loop]
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+mode = "baked"
+feedback_surface = "/opt/loop/submit.sh"

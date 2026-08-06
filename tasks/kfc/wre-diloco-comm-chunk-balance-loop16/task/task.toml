@@ -1,0 +1,55 @@
+# wre-diloco-comm-chunk-balance — CPU-lane. PERFORMANCE.
+
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wre-diloco-comm-chunk-balance-loop16"
+bench = "kfc"
+kind = "performance"
+language = "python"
+title = "submission/kernel.py ships a required function balance_chunks whose body is not implemented (it raises NotImplementedError)."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/, environment/loop/, environment/runtime/ recovered from):
+#   <internal registry>/kernelbench/wre-diloco-comm-chunk-balance-loop16:v1@sha256:7c2e8cc4859b65d297c16c47608ffa78301ac080a1175d43721a6e39d00aa7b0
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-wre-diloco-comm-chunk-balance-loop16:oss .`
+[environment]
+docker_image = "fai/kfc-wre-diloco-comm-chunk-balance-loop16:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 4
+memory_mb = 16384
+gpus = 0
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "performance"
+contract_pattern = "kernelbench_generic_v1"
+timing_metric = "speedup"
+primary_edit_paths = ["submission/kernel.py"]
+forbidden_edit_paths = ["*"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+reward_formula = "performance: reward = min(1.0, ln(speedup/ref_speedup)/ln(ref_speedup)) if speedup > ref_speedup else 0.0; 0 if a hard gate fails or speedup <= 1."
+ref_speedup = 1.66973
+ref_speedup_source = "tests/ref_speedup.txt"
+calibrated_on = "Intel Sapphire Rapids CPU lane"
+
+[loop]
+# NOTE: the /opt/loop harness baked into the image applies its own 3/16 in-session budget; for in-session loop scoring the image is authoritative.
+min_submissions = 1
+max_submissions = 1
+submit = "bash /opt/loop/submit.sh"
+mode = "baked"
+feedback_surface = "/opt/loop/submit.sh"

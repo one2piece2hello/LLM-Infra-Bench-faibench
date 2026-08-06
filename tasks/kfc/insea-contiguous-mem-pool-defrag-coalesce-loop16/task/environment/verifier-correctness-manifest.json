@@ -1,0 +1,33 @@
+{
+  "schema_version": "kernelbench_correctness_manifest_v1",
+  "task_id": "insea-contiguous-mem-pool-defrag-coalesce-loop16",
+  "task_kind": "acceleration",
+  "expected_case_count": 14,
+  "primary_workload": "mem-pool-defrag-Ir",
+  "ref_speedup": 2.0,
+  "ref_speedup_note": "Anchor 3.01623 calibrated in oracle mode on the authoring CPU lane (Intel Sapphire Rapids). tests/ref_speedup.txt is authoritative at scoring; this file is only the in-image fallback. See tests/ref_speedup.caveat.md to re-measure on your hardware.",
+  "metric": "callgrind_ir",
+  "direction": "higher_is_better",
+  "target_hardware": "cpu (x86-64 Sapphire Rapids; pure-Python stdlib -> no AVX-512 in hot path -> callgrind safe)",
+  "value_axis": "retired instruction count (Ir) for build+op-stream on a fragmented arena; a naive allocator re-sorts+re-scans the whole free list on every release and allocate",
+  "correctness_axes": [
+    "normal_alloc_free_mix",
+    "normal_first_fit_lowest_address",
+    "boundary_full_arena",
+    "boundary_alloc_zero",
+    "degenerate_free_all_one_run",
+    "degenerate_full_then_reuse",
+    "error_free_bad_id",
+    "error_alloc_too_big_and_bad_args",
+    "compaction_required",
+    "metamorphic_free_order_independence",
+    "metamorphic_alloc_release_roundtrip",
+    "invariant_no_overlap_bookkeeping",
+    "hidden_long_op_stream",
+    "work_evidence_relocation_count"
+  ],
+  "public_symbol": "MemoryPool",
+  "primary_edit_paths": [
+    "/app/repo/mem_pool.py"
+  ]
+}

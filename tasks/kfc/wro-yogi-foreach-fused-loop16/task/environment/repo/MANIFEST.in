@@ -1,0 +1,9 @@
+include LICENSE
+include CHANGES.rst
+include README.rst
+include Makefile
+graft torch_optimizer
+graft tests
+prune docs/_build
+include examples/mnist.py
+global-exclude *.py[cod]

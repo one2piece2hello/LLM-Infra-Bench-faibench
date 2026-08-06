@@ -1,0 +1,141 @@
+diff --git a/flash_attn/cute/interface.py b/flash_attn/cute/interface.py
+index 9512322..4bea468 100644
+--- a/flash_attn/cute/interface.py
++++ b/flash_attn/cute/interface.py
+@@ -2196,102 +2196,6 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
+         return dq, dk, dv, *((None,) * 31)
+ 
+ 
+-def _block_sparse_dense_allow_mask(bst, sq, sk, device):
+-    """Reconstruct a dense (sq, sk) boolean allow-mask from the caller-supplied ordered integer
+-    index arrays in the ``BlockSparseTensorsTorch`` argument. For each M-block ``m`` (of size
+-    ``block_size[0]`` along the query axis), the set of allowed N-block indices along the key
+-    axis is the union of the first ``mask_block_cnt[m]`` entries of ``mask_block_idx[m]``
+-    (partial/boundary blocks) with the first ``full_block_cnt[m]`` entries of
+-    ``full_block_idx[m]`` (fully-covered blocks). Broadcast dims batch/head are collapsed via
+-    any-True (a position allowed for any (batch, head) is allowed here — the workload uses
+-    (batch=1, head=1) broadcast so this is a no-op)."""
+-    bq, bkv = bst.block_size
+-    num_m_blocks = (sq + bq - 1) // bq
+-    allow = torch.zeros(sq, sk, dtype=torch.bool, device=device)
+-
+-    def _mark(cnts, idxs):
+-        if cnts is None or idxs is None:
+-            return
+-        for m in range(num_m_blocks):
+-            r0, r1 = m * bq, min((m + 1) * bq, sq)
+-            allowed_ns = set()
+-            for bi in range(cnts.shape[0]):
+-                for hi in range(cnts.shape[1]):
+-                    c = int(cnts[bi, hi, m].item())
+-                    for k_i in range(c):
+-                        allowed_ns.add(int(idxs[bi, hi, m, k_i].item()))
+-            for n_ in allowed_ns:
+-                c0, c1 = n_ * bkv, min((n_ + 1) * bkv, sk)
+-                allow[r0:r1, c0:c1] = True
+-
+-    _mark(bst.mask_block_cnt, bst.mask_block_idx)
+-    _mark(bst.full_block_cnt, bst.full_block_idx)
+-    return allow
+-
+-
+-def _block_sparse_attn_from_mask(q, k, v, softmax_scale, allow_mask):
+-    """Differentiable multi-head block-sparse attention forward built from the dense boolean
+-    allow-mask: forms the (batch, heads, seqlen_q, seqlen_k) score matrix, sets the disallowed
+-    positions to -inf, then applies softmax and the weighted sum with values. Grouped-query is
+-    supported by sharing each K/V head across consecutive query heads. Used to recompute the
+-    gradients for the autograd Function below, which differentiates through this call."""
+-    b, sq, hq, d = q.shape
+-    sk = k.shape[1]
+-    hk = k.shape[2]
+-    kk, vv = k, v
+-    if hk != hq:
+-        rep = hq // hk
+-        kk = k.repeat_interleave(rep, dim=2)
+-        vv = v.repeat_interleave(rep, dim=2)
+-    qf = q.transpose(1, 2)
+-    kf = kk.transpose(1, 2)
+-    vf = vv.transpose(1, 2)
+-    scores = torch.matmul(qf, kf.transpose(-1, -2)) * softmax_scale
+-    scores = scores.masked_fill(~allow_mask.view(1, 1, sq, sk), float("-inf"))
+-    probs = torch.softmax(scores, dim=-1)
+-    probs = torch.nan_to_num(probs, nan=0.0)
+-    return torch.matmul(probs, vf).transpose(1, 2)
+-
+-
+-class _BlockSparseAttnFn(torch.autograd.Function):
+-    """Autograd Function for block-sparse multi-head attention.
+-
+-    forward() calls _flash_attn_fwd with the block_sparse_tensors argument and returns the
+-    attention output together with its log-sum-exp row statistic.
+-    backward() rebuilds the dense block-band boolean allow-mask from the integer index arrays
+-    carried by block_sparse_tensors, re-evaluates the differentiable forward defined above
+-    under that mask, and forms dq/dk/dv with torch.autograd.
+-    """
+-
+-    @staticmethod
+-    def forward(ctx, q, k, v, softmax_scale, block_sparse_tensors, return_lse):
+-        out, lse = _flash_attn_fwd(
+-            q, k, v, softmax_scale=softmax_scale, causal=False,
+-            block_sparse_tensors=block_sparse_tensors, return_lse=True,
+-        )
+-        ctx.save_for_backward(q, k, v)
+-        ctx.softmax_scale = softmax_scale
+-        ctx.block_sparse_tensors = block_sparse_tensors
+-        ctx.set_materialize_grads(False)
+-        return out, lse
+-
+-    @staticmethod
+-    def backward(ctx, dout, dlse):
+-        q, k, v = ctx.saved_tensors
+-        if dout is None:
+-            return None, None, None, None, None, None
+-        scale = ctx.softmax_scale if ctx.softmax_scale is not None else (q.shape[-1] ** -0.5)
+-        bst = ctx.block_sparse_tensors
+-        with torch.enable_grad():
+-            qd = q.detach().float().requires_grad_(True)
+-            kd = k.detach().float().requires_grad_(True)
+-            vd = v.detach().float().requires_grad_(True)
+-            allow = _block_sparse_dense_allow_mask(bst, q.shape[1], k.shape[1], q.device)
+-            o = _block_sparse_attn_from_mask(qd, kd, vd, scale, allow)
+-            dq, dk, dv = torch.autograd.grad(o, (qd, kd, vd), dout.float())
+-        return dq.to(q.dtype), dk.to(k.dtype), dv.to(v.dtype), None, None, None
+-
+-
+ def flash_attn_func(
+     q: torch.Tensor,
+     k: torch.Tensor,
+@@ -2315,10 +2219,29 @@ def flash_attn_func(
+     block_sparse_tensors_bwd: Optional[BlockSparseTensorsTorch] = None,
+     return_lse: bool = False,
+ ):
+-    out_, lse_ = _BlockSparseAttnFn.apply(q, k, v, softmax_scale, block_sparse_tensors, return_lse)
+-    if return_lse:
+-        return out_, lse_
+-    return out_
++    return FlashAttnFunc.apply(
++        q,
++        k,
++        v,
++        qv,
++        gather_kv_indices,
++        softmax_scale,
++        causal,
++        window_size,
++        learnable_sink,
++        softcap,
++        num_splits,
++        pack_gqa,
++        deterministic,
++        score_mod,
++        score_mod_bwd,
++        mask_mod,
++        aux_tensors,
++        aux_scalars,
++        block_sparse_tensors,
++        block_sparse_tensors_bwd,
++        return_lse,
++    )
+ 
+ 
+ def flash_attn_varlen_func(

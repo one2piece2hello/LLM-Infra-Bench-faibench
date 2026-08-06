@@ -1,0 +1,8 @@
+ref_speedup = 55.610556  (the oracle's measured median speedup over the frozen degraded baseline
+in the SAME image). Source: the recorded oracle-mode measurement for this task — an ALREADY-MEASURED oracle anchor, copied verbatim;
+no new measurement was taken.
+
+Why this file exists: the shipped image does NOT carry /opt/verifier-correctness-manifest.json,
+so test.sh's ref_speedup fell back to 1.0. Under the old raw-speedup reward that was harmless;
+under the log-curve reward formula, ref_speedup<=1 is a hard pre-gate and zeroed every run. tests/ is
+uploaded fresh at scoring time, so this override needs NO image rebuild.

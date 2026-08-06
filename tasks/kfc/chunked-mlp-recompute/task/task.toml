@@ -1,0 +1,55 @@
+# chunked-mlp-recompute. GPU task (anchor calibrated on H20).
+# Reconstructed: the source package shipped no task.toml (a known gap), so the
+# single-submission constraint had nowhere to live. Resources mirror the task
+# metadata; the loop table is reconstructed.
+# task_class = 实现类 (IMPLEMENTATION) -> reward is BINARY (the reward specification).
+
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "chunked-mlp-recompute"
+bench = "kfc"
+kind = "implementation"
+language = "python"
+title = "submission/kernel.py ships a required function gated_mlp_fwd_bwd whose body is not implemented (it raises NotImplementedError)."
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wre-memwall-chunked-mlp-recompute-loop16:v1@sha256:a2a0d887b4e9436f8e29b79ab396f6fcacb879ad2b36ee6a5706c026ac3e1c5b
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/kfc-chunked-mlp-recompute:oss .`
+[environment]
+docker_image = "fai/kfc-chunked-mlp-recompute:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 1
+# H20 只是**锚点标定用卡**,不是硬性限制。换卡时:①按 tests/ref_speedup.caveat.md 重标锚点;
+#   ②用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像。
+gpu_types = ["H20"]
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "correctness"
+contract_pattern = "kernelbench_generic_v1"
+timing_metric = "peak_bytes"
+primary_edit_paths = ["submission/kernel.py"]
+forbidden_edit_paths = ["*"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "binary_correctness"
+goal = "maximize"
+# reward = 1.0 iff EVERY visible correctness case passes and no cheating, else 0.0.
+# peak_bytes is still measured and reported as a diagnostic, but never scaled into
+# the reward (an implementation-class task earns no partial credit).
+reward_formula = "binary: 1.0 iff all cases pass and no cheating, else 0.0"
+calibrated_on = "NVIDIA H20"
+

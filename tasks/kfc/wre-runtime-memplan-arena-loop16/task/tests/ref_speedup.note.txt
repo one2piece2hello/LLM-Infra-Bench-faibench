@@ -1,0 +1,8 @@
+ref_speedup = the oracle's speedup over the degraded/naive reference baseline in the
+SAME image, derived from the recorded live 4-mode/5-mode validation anchors:
+  ref_speedup = 1 / baseline2_vs_oracle = 1 / 0.176 = 5.681818
+  source: the recorded 5-mode validation anchors (oracle mode measured vs_oracle = 1.0)
+This is NOT a new measurement — it is an algebraic restatement of the already-measured
+anchors, needed because this verifier reports vs_oracle (oracle_ms/cand_ms) rather than
+an absolute speedup. absolute speedup = vs_oracle * ref_speedup.
+Uploaded fresh with tests/ at scoring time, so recalibration needs no image rebuild.

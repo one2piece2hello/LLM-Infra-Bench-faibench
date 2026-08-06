@@ -1,0 +1,100 @@
+# syntax=docker/dockerfile:1
+# =============================================================================
+# e2e-a4-token-efficiency-budget — OPEN-SOURCE **loop16** overlay
+#
+#   THIS is the form the published scores were produced with. The task's original graded image
+#   was e2e-a4-token-efficiency-budget:v3-deleak-loop16 — a 16-round self-improvement protocol,
+#   not a single shot. environment/Dockerfile builds the SINGLE-SHOT base; this file adds the
+#   /opt/loop harness on top, exactly as the private overlay did (its recipe is preserved beside
+#   this file as environment/loop_overlay/Dockerfile).
+#
+#   Pick the form you want:
+#     * single shot  -> environment/Dockerfile           (one submission, scored by /tests)
+#     * 16 rounds    -> this file                        (matches the reported leaderboard runs)
+#   The GRADED surface is identical in both: /tests is mounted fresh and nothing here touches
+#   compute_reward.py, the held-out corpus or the calibrated anchors.
+#
+# -----------------------------------------------------------------------------
+# BUILD (two steps — this is an overlay, exactly like the original)
+#     cd <...>/a4-token-efficiency-budget/task
+#     docker build -f environment/Dockerfile        -t fai/e2e-a4-token-efficiency-budget:oss .
+#     docker build -f environment/Dockerfile.loop16 -t fai/e2e-a4-token-efficiency-budget:oss-loop16 .
+#   (override the base with --build-arg BASE_IMAGE=... if you tagged it differently)
+#
+# RUN   docker run --rm --gpus all --shm-size=8g -it fai/e2e-a4-token-efficiency-budget:oss-loop16
+#       # in-session, per round:   bash /opt/loop/submit.sh
+#       # when done:               bash /opt/loop/submit.sh --finalize
+#
+# SCORE (unchanged; tests/ is MOUNTED, never baked)
+#     docker run --rm --gpus all --shm-size=8g \
+#       -v "$PWD/tests:/tests:ro" fai/e2e-a4-token-efficiency-budget:oss-loop16 bash /tests/test.sh
+#
+# WHAT THE HARNESS IS (and what it deliberately is NOT)
+#   /opt/loop/submit.sh          solver-callable: score the current state, get sanitised feedback;
+#                                --finalize plants the best-of-k snapshot and ends the loop.
+#   /opt/loop/score_engine.sh    the in-session DEV proxy scorer. Trains the candidate recipe on a
+#                                SMALL PUBLIC token shard (3M vs the graded 24M) sliced from the
+#                                /data/datasets/wikitext_bpe8k the solver already has, under the
+#                                same uid-65534 drop the graded path uses, and reports an ABSOLUTE
+#                                public-proxy val_bpb.
+#   /opt/loop/private/manifest.json   dev-only constants (dev seed 1234 — distinct from every
+#                                graded seed; dev token budget; the same param [floor, cap] the
+#                                graded scorer re-counts).
+#   /opt/loop/baseline_submission/    the pristine shipped starter, kept so --finalize can restore it.
+#   It carries NO held-out corpus, NO reference recipe and NO calibrated anchor: the per-round
+#   signal is an absolute public-proxy val_bpb, never normalised against baseline_bpb/ref_speedup.
+#   Because the budget is TOKENS (not wall-clock), the proxy is node-speed-immune, which is what
+#   makes a stable per-round signal possible for this task.
+#
+#   Modes/ownership are root 0700/0600 for score_engine.sh, sanitize_feedback.py, private/ and
+#   baseline_submission/ — mirroring both the private overlay's stated red-line and the modes
+#   observed in the shipped sibling images. NOTE this is a structural convention, not a security
+#   boundary: when the session runs as uid 0, root-0700 is readable. The real protection is that
+#   the reference recipe and the anchors are NOT IN THIS IMAGE AT ALL.
+# =============================================================================
+ARG BASE_IMAGE=fai/e2e-a4-token-efficiency-budget:oss
+FROM ${BASE_IMAGE}
+SHELL ["/bin/bash","-c"]
+
+# ---- the base must not already carry /opt/loop: a layer union over an existing tree would let
+#      stale content show through (the original overlay asserted the same thing). ----
+RUN test ! -e /opt/loop || { echo "BUILD_ASSERT_FAIL: base already has /opt/loop"; exit 1; }
+
+COPY environment/loop_overlay/opt_loop/ /opt/loop/
+COPY environment/loop_overlay/instruction_loop16.md /app/instruction.md
+
+RUN chown -R root:root /opt/loop \
+ && chmod 0755 /opt/loop \
+ && chmod 0755 /opt/loop/submit.sh \
+ && chmod 0700 /opt/loop/score_engine.sh \
+ && chmod 0700 /opt/loop/sanitize_feedback.py \
+ && chmod -R go-rwx /opt/loop/private /opt/loop/baseline_submission \
+ && chmod 0700 /opt/loop/private /opt/loop/baseline_submission \
+ && find /opt/loop/private /opt/loop/baseline_submission -type f -exec chmod 0600 {} \; \
+ && find /opt/loop/private /opt/loop/baseline_submission -type d -exec chmod 0700 {} \; \
+ && chmod 0644 /app/instruction.md \
+ && echo "[build] /opt/loop staged with the overlay's declared ownership/modes"
+
+# ---- 🔴 the original overlay's two regression tripwires, preserved verbatim in intent:
+#      (1) no calibrated anchor VALUE may appear anywhere under /opt/loop — prose that NAMES
+#          baseline_bpb / ref_speedup to explain their ABSENCE is fine, a NUMBER is not;
+#      (2) no old-protocol token (the 3-16 / min_submissions=3 wording) may survive.
+#      NOTE: no inline `#` inside this RUN — shell-form RUN joins the \-continued lines into ONE
+#      command, where a `#` would comment out everything after it. ----
+RUN set -eu; rc=0; \
+    if grep -rIEq "1\.70214|1\.7034|1\.20452|1\.41311|1\.4094|1\.4131" /opt/loop; then \
+      echo "BUILD_ASSERT_FAIL: calibrated anchor VALUE present in /opt/loop"; rc=1; fi; \
+    if grep -rIEq "3-16|3 consecutive|min_submissions[ =]*3|MIN_SUB(MISSIONS)?=3" /opt/loop /app/instruction.md; then \
+      echo "BUILD_ASSERT_FAIL: old-protocol token present"; rc=1; fi; \
+    test -f /opt/loop/submit.sh && test -x /opt/loop/submit.sh || { echo "BUILD_ASSERT_FAIL: submit.sh missing or not executable"; rc=1; }; \
+    test -f /opt/loop/private/manifest.json || { echo "BUILD_ASSERT_FAIL: dev manifest missing"; rc=1; }; \
+    test -f /opt/loop/baseline_submission/train_gpt.py || { echo "BUILD_ASSERT_FAIL: pristine starter missing"; rc=1; }; \
+    for p in /tests /opt/verifier /opt/strong_baseline /opt/negative /opt/ceiling; do \
+      if [ -e "$p" ]; then echo "BUILD_ASSERT_FAIL: frozen-surface path present: $p"; rc=1; fi; \
+    done; \
+    if find /opt/loop -type f -name '*.patch' | grep -q .; then \
+      echo "BUILD_ASSERT_FAIL: a patch file is baked under /opt/loop"; rc=1; fi; \
+    test "$rc" = 0; \
+    echo "[build] loop16 overlay asserts PASS: no anchor value, no stale protocol wording, no reference impl"
+
+# /logs/loop is created world-writable at runtime by submit.sh — nothing to bake.

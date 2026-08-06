@@ -1,0 +1,56 @@
+schema_version = "2.0"
+
+# 提交产物(pre_artifacts.sh 在判分前于同一容器内产出;规范 §1)
+artifacts = ["/logs/artifacts/model.patch", "/logs/artifacts/model_files.txt"]
+
+[task]
+id = "wro-fla-gated-delta-chunkscan-sol"
+bench = "lh"
+kind = "performance"
+language = "python"
+title = "Optimize a gated delta-rule linear-attention subsystem (Gated DeltaNet)"
+instruction = "instruction.md"
+
+[agent]
+timeout_sec = 5400
+
+# carved-tree provenance (environment/repo/ recovered from): <internal registry>/kernelbench/wro-fla-gated-delta-chunkscan-sol-loop16:v3z@sha256:38e106afa4451a9b1cb91da0086ec3589f27f6a7be2f626611303f6d4501d5a3
+# Open-source build: `cd <this dir> && docker build -f environment/Dockerfile -t fai/lh-fla-gated-delta-chunkscan:oss .`
+# provenance (original internal image, not publicly pullable): <internal registry>/kernelbench/wro-fla-gated-delta-chunkscan-sol-loop16:v3z@sha256:38e106afa4451a9b1cb91da0086ec3589f27f6a7be2f626611303f6d4501d5a3
+[environment]
+docker_image = "fai/lh-fla-gated-delta-chunkscan:oss"
+dockerfile = "environment/Dockerfile"
+build_timeout_sec = 3600
+cpus = 8
+memory_mb = 32768
+gpus = 1
+# H20 只是**锚点标定用卡**,不是硬性限制。换卡时:
+#   1) 按 tests/verifier-correctness-manifest.json 的 recalibrate_howto 重新标定锚点;
+#   2) 用 --build-arg TORCH_CUDA_ARCH_LIST=<你的算力> 构建镜像(8.0 A100 / 8.9 L40S·4090 / 9.0 H100·H20 / 10.0 B200)。
+gpu_types = ["H20"]
+allow_internet = false
+
+[verifier]
+entrypoint = "tests/test.sh"
+mode = "shared"
+task_kind = "acceleration"
+contract_pattern = "kernelbench_generic_v1"
+primary_edit_paths = [
+    "fla/ops/gated_delta_rule/chunk.py",
+    "fla/ops/gated_delta_rule/chunk_fwd.py",
+    "fla/ops/gated_delta_rule/gate.py",
+]
+forbidden_edit_paths = ["*"]
+result_paths = ["/logs/verifier/reward.json"]
+
+[primary_metric]
+name = "speedup"
+goal = "maximize"
+ref_speedup = 822.619615
+ref_speedup_source = "tests/verifier-correctness-manifest.json"
+calibrated_on = "NVIDIA H20"
+
+[loop]
+min_submissions = 1
+max_submissions = 16
+submit = "bash /opt/loop/submit.sh"
